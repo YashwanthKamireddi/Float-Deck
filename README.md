@@ -35,9 +35,14 @@ FloatAI is a mission console for ARGO ocean intelligence:
 
 1. Create (or reuse) a PostgreSQL database called `postgres` (or adjust `DB_NAME` accordingly).
 2. Ensure the `argo_profiles` table exists with the schema expected by the ETL pipeline.
-3. (Optional) Run the ETL to load NetCDF data:
+3. (Optional) Run the ETL to load NetCDF data. The loader now streams via PostgreSQL COPY for
+   ~20x faster inserts and exposes a couple of helpful switches:
    ```powershell
+   # full rebuild (default behaviour truncates + reloads)
    python data_pipeline/build_database.py
+
+   # smoke test just a handful of files without wiping existing rows
+   python data_pipeline/build_database.py --limit 5 --no-truncate --skip-index
    ```
 
 ## 3. Build the FAISS knowledge base

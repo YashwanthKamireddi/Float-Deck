@@ -42,6 +42,7 @@ interface ChatInterfaceProps {
   palettePrefill: string | null;
   onPrefillConsumed: () => void;
   onBackendStatusChange?: (status: BackendStatus, detail?: string) => void;
+  variant?: "full" | "tray";
 }
 
 const buildWelcomeMessage = (): Message => ({
@@ -176,7 +177,9 @@ const ChatInterface = ({
   palettePrefill,
   onPrefillConsumed,
   onBackendStatusChange = () => {},
+  variant = "full",
 }: ChatInterfaceProps) => {
+  const isTray = variant === "tray";
   const [messages, setMessages] = useState<Message[]>(() => [buildWelcomeMessage()]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -508,25 +511,27 @@ Let me know if you’d like to dive into any detail further or filter this view.
     });
   }, [onDataReceived, onBackendStatusChange, scrollToBottom]);
 
+  const visibleStatChips = isTray ? statChips.slice(0, 2) : statChips;
+
   return (
-    <div className="flex h-full min-h-0 flex-col gap-5 text-sm">
-      <header className="shrink-0 rounded-2xl border border-white/20 bg-white/70 px-5 py-3 shadow-[0_16px_32px_-28px_rgba(15,23,42,0.35)] backdrop-blur-md dark:border-white/10 dark:bg-white/[0.05]">
-        <div className="flex flex-wrap items-center justify-between gap-4">
+    <div className={`flex h-full min-h-0 flex-col ${isTray ? "gap-2.5 text-[0.95rem]" : "gap-5 text-sm"}`}>
+      <header className={`shrink-0 rounded-2xl border border-white/20 ${isTray ? "bg-white/90 px-3.5 py-2" : "bg-white/70 px-5 py-3"} shadow-[0_16px_32px_-28px_rgba(15,23,42,0.35)] backdrop-blur-md dark:border-white/10 ${isTray ? "dark:bg-slate-900/80" : "dark:bg-white/[0.05]"}`}>
+        <div className={`flex flex-wrap items-center justify-between ${isTray ? "gap-3" : "gap-4"}`}>
           <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-ocean text-white shadow-md shadow-sky-500/30">
+            <div className={`flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-ocean text-white shadow-md shadow-sky-500/30 ${isTray ? "shrink-0" : ""}`}>
               <Bot className="h-4 w-4" />
             </div>
-            <div className="min-w-[180px]">
+            <div className="min-w-[160px]">
               <h3 className="text-sm font-semibold leading-tight">FloatAI</h3>
-              <p className="text-[0.7rem] text-muted-foreground">{sessionTagline}</p>
+              <p className="text-[0.7rem] text-muted-foreground line-clamp-1">{sessionTagline}</p>
             </div>
           </div>
 
           <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-            {statChips.map((chip) => (
+            {visibleStatChips.map((chip) => (
               <div
                 key={`${chip.label}-${chip.value}`}
-                className="flex h-9 items-center gap-2 rounded-xl border border-white/30 bg-white/60 px-3 text-[0.65rem] font-semibold uppercase tracking-[0.26em] text-slate-600 shadow-sm shadow-slate-400/10 dark:border-white/10 dark:bg-white/[0.08] dark:text-slate-200"
+                className="flex h-8 items-center gap-2 rounded-xl border border-white/30 bg-white/70 px-3 text-[0.65rem] font-semibold uppercase tracking-[0.22em] text-slate-600 shadow-sm shadow-slate-400/10 dark:border-white/10 dark:bg-white/[0.08] dark:text-slate-200"
               >
                 <span className="opacity-70">{chip.label}</span>
                 <span className="tracking-normal">{chip.value}</span>
@@ -537,7 +542,7 @@ Let me know if you’d like to dive into any detail further or filter this view.
               type="button"
               variant="ghost"
               size="sm"
-              className="h-9 rounded-xl border border-white/30 bg-white/50 px-3 text-[0.7rem] font-semibold uppercase tracking-[0.24em] text-slate-600 shadow-sm hover:-translate-y-0.5 hover:border-white/60 hover:bg-white/80 dark:border-white/10 dark:bg-white/[0.08] dark:text-slate-100"
+              className="h-8 rounded-xl border border-white/30 bg-white/60 px-3 text-[0.7rem] font-semibold uppercase tracking-[0.22em] text-slate-600 shadow-sm hover:-translate-y-0.5 hover:border-white/60 hover:bg-white/80 dark:border-white/10 dark:bg-white/[0.08] dark:text-slate-100"
               onClick={handleResetConversation}
               disabled={isLoading}
             >
@@ -549,9 +554,12 @@ Let me know if you’d like to dive into any detail further or filter this view.
       </header>
 
       <div className="relative flex-1 min-h-0">
-        <ScrollArea ref={scrollAreaRef} className="data-scroll h-full max-h-[calc(100vh-260px)] rounded-[24px] border border-white/20 bg-white/55 p-5 shadow-[0_34px_68px_-42px_rgba(15,23,42,0.55)] backdrop-blur-xl dark:border-white/10 dark:bg-white/[0.04]">
+        <ScrollArea
+          ref={scrollAreaRef}
+          className={`data-scroll h-full ${isTray ? "max-h-[70vh]" : "max-h-[calc(100vh-260px)]"} flex-1 rounded-[24px] border border-white/20 bg-white/55 ${isTray ? "p-3.5" : "p-5"} shadow-[0_34px_68px_-42px_rgba(15,23,42,0.55)] backdrop-blur-xl dark:border-white/10 dark:bg-white/[0.04]`}
+        >
           <div
-            className="flex flex-col gap-6 pr-6 sm:pr-8"
+            className={`flex flex-col ${isTray ? "gap-4 pr-4" : "gap-6 pr-6 sm:pr-8"}`}
             style={{ paddingBottom: `${bottomSafePadding}px` }}
           >
             {messages.map((message) => {
@@ -648,20 +656,22 @@ Let me know if you’d like to dive into any detail further or filter this view.
           handleSend();
         }}
         ref={composerRef}
-        className="shrink-0 rounded-[24px] border border-white/20 bg-white/65 px-5 py-4 shadow-[0_22px_44px_-35px_rgba(15,23,42,0.4)] backdrop-blur-xl dark:border-white/10 dark:bg-white/[0.05]"
+        className={`shrink-0 rounded-[24px] border border-white/20 bg-white/70 ${isTray ? "px-3.5 py-3" : "px-5 py-4"} shadow-[0_22px_44px_-35px_rgba(15,23,42,0.4)] backdrop-blur-xl dark:border-white/10 dark:bg-white/[0.05]`}
       >
-        <div className="mb-4 flex flex-wrap items-center gap-2 text-[0.65rem] uppercase tracking-[0.32em] text-slate-500 dark:text-slate-300">
-          <span>Chat Composer</span>
-        </div>
+        {!isTray && (
+          <div className="mb-4 flex flex-wrap items-center gap-2 text-[0.65rem] uppercase tracking-[0.32em] text-slate-500 dark:text-slate-300">
+            <span>Chat Composer</span>
+          </div>
+        )}
         <div className="flex flex-col gap-3">
-          <div className="relative flex min-h-[125px] flex-1 rounded-[28px] bg-white/95 px-5 py-4 shadow-[0_24px_50px_-36px_rgba(15,23,42,0.45)] transition-all duration-200 dark:bg-white/[0.07]">
+          <div className={`relative flex ${isTray ? "min-h-[90px]" : "min-h-[125px]"} flex-1 rounded-[28px] bg-white/95 px-4 py-3 shadow-[0_24px_50px_-36px_rgba(15,23,42,0.45)] transition-all duration-200 dark:bg-white/[0.07]`}>
             <Textarea
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleComposerKeyDown}
-              placeholder="Craft your directive or ask a follow-up..."
+              placeholder="Ask a question or issue a directive..."
               rows={1}
-              className="w-full resize-none border-none bg-transparent pr-16 text-base leading-relaxed tracking-tight text-slate-700 outline-none focus:ring-0 focus-visible:ring-0 focus-visible:ring-offset-0 dark:text-slate-100"
+              className="w-full resize-none border-none bg-transparent pr-14 text-base leading-relaxed tracking-tight text-slate-700 outline-none focus:ring-0 focus-visible:ring-0 focus-visible:ring-offset-0 dark:text-slate-100"
               disabled={isLoading}
               ref={inputRef}
               aria-label="Chat composer"
@@ -669,7 +679,7 @@ Let me know if you’d like to dive into any detail further or filter this view.
             <Button
               type="submit"
               disabled={!input.trim() || isLoading}
-              className="absolute bottom-4 right-4 flex h-11 w-11 items-center justify-center rounded-full bg-gradient-to-br from-sky-500 via-indigo-500 to-purple-500 shadow-lg shadow-sky-500/25 transition hover:-translate-y-0.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-300 disabled:cursor-not-allowed"
+              className="absolute bottom-3 right-3 flex h-11 w-11 items-center justify-center rounded-full bg-gradient-to-br from-sky-500 via-indigo-500 to-purple-500 shadow-lg shadow-sky-500/25 transition hover:-translate-y-0.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-300 disabled:cursor-not-allowed"
             >
               <Send className="h-4 w-4" />
             </Button>

@@ -117,6 +117,15 @@ export interface DataQualityReport {
   description?: string;
 }
 
+export interface TrajectoryPoint {
+  lat: number;
+  lon: number;
+  timestamp: string;
+  temperature?: number | null;
+  salinity?: number | null;
+  pressure?: number | null;
+}
+
 export interface DatabaseStats {
   total_floats: number;
   last_updated?: string | null;
@@ -300,6 +309,24 @@ export const floatAIAPI = {
     } catch (error) {
       console.warn("FloatAI API: falling back to sample quality report", { floatId, error });
       return SAMPLE_QUALITY;
+    }
+  },
+
+  async getFloatTrajectory(floatId: string, limit = 50): Promise<TrajectoryPoint[]> {
+    try {
+      const query = new URLSearchParams({ limit: String(limit) }).toString();
+      return await fetchJson<TrajectoryPoint[]>(`floats/${floatId}/trajectory?${query}`);
+    } catch (error) {
+      console.warn("FloatAI API: falling back to synthetic trajectory", { floatId, error });
+      const now = Date.now();
+      return Array.from({ length: Math.min(limit, 10) }, (_, index) => ({
+        lat: 40.7 + index * 0.02,
+        lon: -74 + index * 0.015,
+        timestamp: new Date(now - (limit - index) * 86400000).toISOString(),
+        temperature: 18.5 - index * 0.1,
+        salinity: 35.2 - index * 0.02,
+        pressure: 1000 + index * 5,
+      }));
     }
   },
 };

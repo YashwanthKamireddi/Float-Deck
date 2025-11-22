@@ -3,15 +3,16 @@
 
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import type { LucideIcon } from "lucide-react";
-import { Compass, CalendarDays, Database } from "lucide-react";
+import { Compass, CalendarDays, Database, X } from "lucide-react";
 import ChatInterface from "@/components/ChatInterface";
 import DataVisualization from "@/components/DataVisualization";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { askAI } from "@/services/api";
+import { askAI, floatAIAPI } from "@/services/api";
 import CommandPalette from "@/components/CommandPalette";
 import { Button } from "@/components/ui/button";
 import ErrorBoundary from "@/components/ErrorBoundary";
+import LandingPage from "@/components/LandingPage";
 
 export interface AppData {
   data: Record<string, any>[];
@@ -167,11 +168,16 @@ const createDataSynopsis = (data: Record<string, any>[]): DataSynopsis | null =>
 
 function App() {
   const [appData, setAppData] = useState<AppData>({ data: [], sqlQuery: "" });
+  const [showLanding, setShowLanding] = useState(() => {
+    if (typeof window === "undefined") return true;
+    return window.localStorage?.getItem("floatai::landing-dismissed") !== "1";
+  });
   const [isLoading, setIsLoading] = useState(true); // For the initial welcome map
   const [mode, setMode] = useState<PersonaMode>("guided");
   const [complexityScore, setComplexityScore] = useState(0);
   const [recentQueries, setRecentQueries] = useState<string[]>([]);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
+  const [showChatTray, setShowChatTray] = useState(true);
   const [dataSynopsis, setDataSynopsis] = useState<DataSynopsis | null>(null);
   const [activeTab, setActiveTab] = useState("analysis");
   const [expertFilters, setExpertFilters] = useState<ExpertFilters>({ focusMetric: "temperature" });
@@ -180,6 +186,11 @@ function App() {
   const [backendStatus, setBackendStatus] = useState<BackendStatus>("operational");
   const [backendStatusDetail, setBackendStatusDetail] = useState<string>(BACKEND_STATUS_MAP.operational.description);
   const [chatInstanceKey, setChatInstanceKey] = useState(0);
+  const [fleetOverview, setFleetOverview] = useState<{
+    totalFloats: number | null;
+    activeFloats: number | null;
+    lastUpdated: string | null;
+  } | null>(null);
 
   const updateBackendStatus = useCallback((status: BackendStatus, detail?: string) => {
     setBackendStatus(status);
@@ -273,6 +284,45 @@ function App() {
   }, [fetchInitialData]);
 
   useEffect(() => {
+    let isMounted = true;
+
+    const loadFleetSnapshot = async () => {
+      try {
+        const [stats, floats] = await Promise.all([
+          floatAIAPI.getDatabaseStats(),
+          floatAIAPI.getArgoFloats(),
+        ]);
+
+        if (!isMounted) {
+          return;
+        }
+
+        const totalFloats = typeof stats?.total_floats === "number" ? stats.total_floats : Array.isArray(floats) ? floats.length : null;
+        const activeFloats = Array.isArray(floats)
+          ? floats.filter((item) => item.status?.toLowerCase() === "active").length
+          : null;
+
+        const lastUpdated = stats?.last_updated
+          ?? (Array.isArray(floats) && floats.length ? floats[0]?.last_contact ?? null : null);
+
+        setFleetOverview({
+          totalFloats,
+          activeFloats,
+          lastUpdated,
+        });
+      } catch (error) {
+        console.warn("FloatAI: failed to load fleet overview", error);
+      }
+    };
+
+    loadFleetSnapshot();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       const key = event.key?.toLowerCase();
       if ((event.ctrlKey || event.metaKey) && key === "k") {
@@ -293,42 +343,76 @@ function App() {
   }, [mode, complexityScore]);
 
   const oceanMetrics = useMemo(() => {
-    if (!appData.data.length) {
+    const baseMetrics = (() => {
+      if (!appData.data.length) {
+        return {
+          totalRecords: "Waiting for data",
+          uniqueFloats: "—",
+          lastObservation: "—",
+        };
+      }
+
+      const totalRecords = appData.data.length.toLocaleString();
+      const uniqueFloats = new Set(
+        appData.data
+          .map((row) => row.float_id)
+          .filter((id) => id !== undefined && id !== null)
+      ).size;
+
+      const mostRecentDate = appData.data
+        .map((row) => row.profile_date || row.date || row.observation_date)
+        .map((value) => {
+          const parsed = value ? new Date(value) : null;
+          return parsed && !Number.isNaN(parsed.getTime()) ? parsed : null;
+        })
+        .filter((date): date is Date => Boolean(date))
+        .sort((a, b) => b.getTime() - a.getTime())[0];
+
       return {
-        totalRecords: "Waiting for data",
-        uniqueFloats: "—",
-        lastObservation: "—",
+        totalRecords,
+        uniqueFloats: uniqueFloats ? uniqueFloats.toLocaleString() : "—",
+        lastObservation: mostRecentDate
+          ? mostRecentDate.toLocaleDateString(undefined, {
+              month: "short",
+              day: "numeric",
+              year: "numeric",
+            })
+          : "—",
       };
+    })();
+
+    if (!fleetOverview) {
+      return baseMetrics;
     }
 
-    const totalRecords = appData.data.length.toLocaleString();
-    const uniqueFloats = new Set(
-      appData.data
-        .map((row) => row.float_id)
-        .filter((id) => id !== undefined && id !== null)
-    ).size;
+    const { totalFloats, activeFloats, lastUpdated } = fleetOverview;
+    const merged = { ...baseMetrics };
 
-    const mostRecentDate = appData.data
-      .map((row) => row.profile_date || row.date || row.observation_date)
-      .map((value) => {
-        const parsed = value ? new Date(value) : null;
-        return parsed && !Number.isNaN(parsed.getTime()) ? parsed : null;
-      })
-      .filter((date): date is Date => Boolean(date))
-      .sort((a, b) => b.getTime() - a.getTime())[0];
+    if (totalFloats !== null) {
+      const activeDisplay =
+        activeFloats !== null
+          ? `${activeFloats.toLocaleString()} active / ${totalFloats.toLocaleString()} total`
+          : totalFloats.toLocaleString();
+      merged.uniqueFloats = activeDisplay;
 
-    return {
-      totalRecords,
-      uniqueFloats: uniqueFloats ? uniqueFloats.toLocaleString() : "—",
-      lastObservation: mostRecentDate
-        ? mostRecentDate.toLocaleDateString(undefined, {
-            month: "short",
-            day: "numeric",
-            year: "numeric",
-          })
-        : "—",
-    };
-  }, [appData.data]);
+      if (baseMetrics.totalRecords === "Waiting for data") {
+        merged.totalRecords = totalFloats.toLocaleString();
+      }
+    }
+
+    if (lastUpdated) {
+      const parsed = new Date(lastUpdated);
+      if (!Number.isNaN(parsed.getTime())) {
+        merged.lastObservation = parsed.toLocaleDateString(undefined, {
+          month: "short",
+          day: "numeric",
+          year: "numeric",
+        });
+      }
+    }
+
+    return merged;
+  }, [appData.data, fleetOverview]);
 
   const missionStatusDescriptor = useMemo(() => {
     const base = BACKEND_STATUS_MAP[backendStatus];
@@ -493,8 +577,34 @@ function App() {
     fetchInitialData();
   }, [fetchInitialData, updateBackendStatus]);
 
+  const dismissLanding = useCallback(() => {
+    setShowLanding(false);
+    if (typeof window !== "undefined") {
+      window.localStorage?.setItem("floatai::landing-dismissed", "1");
+    }
+  }, []);
+
+  const handleShowLanding = useCallback(() => {
+    setShowLanding(true);
+    if (typeof window !== "undefined") {
+      window.localStorage?.removeItem("floatai::landing-dismissed");
+    }
+  }, []);
+
+  const toggleChatTray = useCallback(() => {
+    setShowChatTray((prev) => !prev);
+  }, []);
+
+  if (showLanding) {
+    return (
+      <ThemeProvider defaultTheme="dark" storageKey="vite-ui-theme">
+        <LandingPage onLaunch={dismissLanding} />
+      </ThemeProvider>
+    );
+  }
+
   return (
-    <ThemeProvider defaultTheme="light" storageKey="vite-ui-theme">
+    <ThemeProvider defaultTheme="dark" storageKey="vite-ui-theme">
       <div className="relative min-h-screen w-full overflow-hidden bg-control-room text-slate-900 transition-colors duration-500 dark:text-slate-100">
         <div className="pointer-events-none absolute inset-0 ambient-veils opacity-60" />
         <div className="pointer-events-none absolute inset-0 grid-overlay opacity-20" />
@@ -503,32 +613,36 @@ function App() {
 
         <main className="relative z-10 flex min-h-screen flex-col">
           <header className="w-full px-6 py-6 lg:px-10 lg:py-6">
-            <div className="flex flex-wrap items-start justify-between gap-6 lg:items-center">
-              <div className="space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-4 lg:gap-6">
+              <div className="space-y-2">
                 <div className={`inline-flex items-center gap-3 rounded-full px-4 py-1.5 shadow-sm backdrop-blur-md ${missionStatusDescriptor.pillClass}`}>
                   <span className={`h-2 w-2 rounded-full ${missionStatusDescriptor.indicatorClass}`} />
                   <span className="text-[0.6rem] font-semibold uppercase tracking-[0.45em] text-slate-600 dark:text-slate-200">Mission Status</span>
                   <span className="text-[0.625rem] font-medium text-slate-600 dark:text-slate-200">{missionStatusDescriptor.label}</span>
                 </div>
-                <p className="text-[0.65rem] uppercase tracking-[0.24em] text-subtle">
-                  {missionStatusDescriptor.description}
+                <h1 className="text-3xl font-semibold leading-tight md:text-4xl">FloatAI Command Deck</h1>
+                <p className="max-w-2xl text-sm text-subtle md:text-base">
+                  Guide autonomous ocean missions, query the ARGO archive, and direct the analysis as the viewscreen responds in real time.
                 </p>
-                <div className="space-y-1.5">
-                  <h1 className="text-3xl font-semibold leading-tight md:text-4xl">FloatAI Command Deck</h1>
-                  <p className="max-w-xl text-sm text-subtle md:text-base">
-                    Guide autonomous ocean missions, query the ARGO archive, and direct the analysis as the viewscreen responds in real time.
-                  </p>
-                </div>
               </div>
 
-              <div className="flex items-center gap-3 rounded-full bg-white/60 px-4 py-1.5 shadow-sm backdrop-blur dark:bg-white/10">
+              <div className="flex flex-wrap items-center gap-2 rounded-full bg-slate-900/70 px-3 py-2 shadow-[0_12px_28px_-14px_rgba(15,23,42,0.55)] backdrop-blur dark:bg-slate-800/80">
                 <ThemeToggle />
                 <Button
                   type="button"
                   size="sm"
-                  variant="outline"
+                  variant="ghost"
+                  onClick={handleShowLanding}
+                  className="rounded-full bg-slate-800/80 px-4 py-2 text-[0.7rem] font-semibold uppercase tracking-[0.24em] text-white shadow-inner shadow-slate-900/40 hover:-translate-y-0.5 hover:bg-slate-700"
+                >
+                  Overview
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
                   onClick={() => setShowCommandPalette(true)}
-                  className="inline-flex items-center rounded-xl border-white/40 bg-white/80 px-4 py-2 text-[0.6rem] font-semibold uppercase tracking-[0.28em] text-slate-600 shadow-sm transition hover:-translate-y-0.5 hover:bg-white dark:border-white/10 dark:bg-white/10 dark:text-slate-200"
+                  className="rounded-full bg-slate-800/70 px-4 py-2 text-[0.7rem] font-semibold uppercase tracking-[0.24em] text-white shadow-inner shadow-slate-900/40 hover:-translate-y-0.5 hover:bg-slate-700"
                   aria-label="Open command palette"
                 >
                   Command Palette
@@ -559,47 +673,94 @@ function App() {
           </header>
 
           <section className="flex w-full flex-1 flex-col px-6 pb-16 lg:px-10 min-h-0">
-            <div className="grid flex-1 min-h-0 gap-8 pb-6 lg:grid-cols-[500px,minmax(0,1fr)] xl:grid-cols-[540px,minmax(0,1fr)] 2xl:grid-cols-[560px,minmax(0,1fr)]">
-              <div className="mission-panel flex h-full min-h-0 flex-col p-6">
-                <div className="pointer-events-none absolute inset-0 rounded-[32px] border-y border-white/10 dark:border-white/5" />
-                <div className="relative z-10 flex h-full flex-col">
-                  <ErrorBoundary onReset={handleChatHardReset}>
-                    <ChatInterface
-                      key={chatInstanceKey}
-                      onDataReceived={handleDataReceived}
-                      onComplexitySignal={handleComplexitySignal}
-                      dataSummary={dataSynopsis}
-                      palettePrefill={palettePrefill}
-                      onPrefillConsumed={handlePrefillConsumed}
-                      onBackendStatusChange={handleBackendStatusChange}
-                    />
-                  </ErrorBoundary>
-                </div>
-              </div>
-
-              <div className="viewscreen-shell flex min-h-[520px] flex-1 flex-col p-8">
-                <div className="relative z-10 flex h-full min-h-0 flex-col">
-                  {isLoading ? (
-                    <div className="flex flex-1 flex-col justify-center gap-6">
-                      <LoadingPanel />
-                    </div>
-                  ) : (
-                    <DataVisualization
-                      data={appData.data}
-                      sqlQuery={appData.sqlQuery}
-                      mode={mode}
-                      synopsis={dataSynopsis}
-                      filters={expertFilters}
-                      onFiltersChange={setExpertFilters}
-                      activeTab={activeTab}
-                      onTabChange={setActiveTab}
-                    />
-                  )}
-                </div>
+            <div className="viewscreen-shell flex min-h-[520px] flex-1 flex-col p-8">
+              <div className="relative z-10 flex h-full min-h-0 flex-col">
+                {isLoading ? (
+                  <div className="flex flex-1 flex-col justify-center gap-6">
+                    <LoadingPanel />
+                  </div>
+                ) : (
+                  <DataVisualization
+                    data={appData.data}
+                    sqlQuery={appData.sqlQuery}
+                    mode={mode}
+                    synopsis={dataSynopsis}
+                    filters={expertFilters}
+                    onFiltersChange={setExpertFilters}
+                    activeTab={activeTab}
+                    onTabChange={setActiveTab}
+                  />
+                )}
               </div>
             </div>
           </section>
         </main>
+
+        <div className="fixed bottom-6 right-6 z-40 flex flex-col items-end gap-3">
+          {showChatTray ? (
+            <div className="w-[480px] max-w-[95vw] max-h-[82vh] overflow-hidden rounded-3xl border border-white/20 bg-white/92 shadow-[0_26px_70px_-40px_rgba(15,23,42,0.65)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/92">
+              <div className="relative flex h-[640px] max-h-[82vh] flex-col">
+                <button
+                  type="button"
+                  onClick={() => setShowChatTray(false)}
+                  className="absolute right-3 top-3 z-10 inline-flex h-8 w-8 items-center justify-center rounded-full bg-slate-900/70 text-white shadow hover:scale-105 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/70 dark:bg-white/20"
+                  aria-label="Close chat"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+                <ErrorBoundary onReset={handleChatHardReset}>
+                  <ChatInterface
+                    key={chatInstanceKey}
+                    onDataReceived={handleDataReceived}
+                    onComplexitySignal={handleComplexitySignal}
+                    dataSummary={dataSynopsis}
+                    palettePrefill={palettePrefill}
+                    onPrefillConsumed={handlePrefillConsumed}
+                    onBackendStatusChange={handleBackendStatusChange}
+                    variant="tray"
+                  />
+                </ErrorBoundary>
+              </div>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setShowChatTray(true)}
+              className="inline-flex items-center gap-2 rounded-full bg-slate-900/85 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-slate-900/40 backdrop-blur focus:outline-none focus-visible:ring-2 focus-visible:ring-white/70 dark:bg-white/20"
+              aria-label="Open chat"
+            >
+              <svg
+                className="h-4 w-4"
+                viewBox="0 0 24 24"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path
+                  d="M5.5 4.75h13a1.75 1.75 0 011.75 1.75v8.5A1.75 1.75 0 0118.5 16.75h-3.69a.75.75 0 00-.53.22l-2.21 2.21a.75.75 0 01-1.28-.53v-1.9a.75.75 0 00-.75-.75H5.5A1.75 1.75 0 013.75 15V6.5A1.75 1.75 0 015.5 4.75z"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                <path
+                  d="M8.5 10h7"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                <path
+                  d="M8.5 12.75h4.5"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+              Chat
+            </button>
+          )}
+        </div>
         <CommandPalette
           open={showCommandPalette}
           onOpenChange={setShowCommandPalette}

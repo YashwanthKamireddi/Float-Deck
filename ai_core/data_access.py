@@ -288,6 +288,53 @@ def fetch_time_series(float_id: str, variable: str = "temperature", limit: int =
     return {"data": series, "sqlQuery": None}
 
 
+def fetch_float_trajectory(float_id: str, limit: int = 50) -> List[Dict[str, Any]]:
+    initialize_ai_core()
+    engine = get_sql_engine()
+    table = _ensure_table(engine)
+
+    stmt = (
+        select(
+            table.c.latitude,
+            table.c.longitude,
+            table.c.profile_date.label("timestamp"),
+            table.c.temperature,
+            table.c.salinity,
+            table.c.pressure,
+        )
+        .where(table.c.float_id == float_id)
+        .where(table.c.latitude.is_not(None), table.c.longitude.is_not(None))
+        .order_by(table.c.profile_date.desc())
+        .limit(limit)
+    )
+
+    try:
+        with engine.connect() as connection:
+            result = connection.execute(stmt)
+            waypoints: List[Dict[str, Any]] = []
+            for row in result.mappings():
+                timestamp = _coerce_datetime(row["timestamp"])
+                latitude = row["latitude"]
+                longitude = row["longitude"]
+                if timestamp is None or latitude is None or longitude is None:
+                    continue
+
+                waypoint = {
+                    "lat": float(latitude),
+                    "lon": float(longitude),
+                    "timestamp": timestamp.isoformat(),
+                    "temperature": float(row["temperature"]) if row["temperature"] is not None else None,
+                    "salinity": float(row["salinity"]) if row["salinity"] is not None else None,
+                    "pressure": float(row["pressure"]) if row["pressure"] is not None else None,
+                }
+                waypoints.append(waypoint)
+    except SQLAlchemyError as exc:  # pragma: no cover - defensive guard
+        raise DataAccessError("Failed to load float trajectory.") from exc
+
+    waypoints.reverse()  # chronological order for plotting
+    return waypoints
+
+
 def fetch_quality_report(float_id: str) -> List[Dict[str, Any]]:
     initialize_ai_core()
     engine = get_sql_engine()

@@ -18,6 +18,7 @@ from ai_core.data_access import (
     fetch_database_stats,
     fetch_float_catalog,
     fetch_float_profile,
+    fetch_float_trajectory,
     fetch_quality_report,
     fetch_time_series,
 )
@@ -110,6 +111,15 @@ class DataQualityMetric(BaseModel):
     unit: Optional[str] = None
     description: Optional[str] = None
 
+
+class TrajectoryPoint(BaseModel):
+    lat: float
+    lon: float
+    timestamp: str
+    temperature: Optional[float] = None
+    salinity: Optional[float] = None
+    pressure: Optional[float] = None
+
 # --- API Endpoint ---
 @app.post("/api/ask", response_model=QueryResponse)
 async def ask_question(request: QueryRequest) -> QueryResponse:
@@ -193,6 +203,19 @@ async def get_float_quality(float_id: str) -> List[DataQualityMetric]:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     return [DataQualityMetric.model_validate(metric) for metric in metrics]
+
+
+@app.get("/api/floats/{float_id}/trajectory", response_model=List[TrajectoryPoint])
+async def get_float_trajectory(
+    float_id: str,
+    limit: int = Query(default=50, ge=2, le=200, description="Number of historical fixes to return."),
+) -> List[TrajectoryPoint]:
+    try:
+        waypoints = fetch_float_trajectory(float_id=float_id, limit=limit)
+    except DataAccessError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    return [TrajectoryPoint.model_validate(point) for point in waypoints]
 
 # --- Run the server ---
 # This block allows you to run the server directly for testing.
