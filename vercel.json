@@ -1,0 +1,9 @@
+{
+  "version": 2,
+  "name": "floatai-frontend",
+  "rootDirectory": "frontend",
+  "framework": "vite",
+  "buildCommand": "npm install && npm run build",
+  "outputDirectory": "dist",
+  "ignoreCommand": "git diff --quiet HEAD^ HEAD -- frontend || exit 1"
+}
