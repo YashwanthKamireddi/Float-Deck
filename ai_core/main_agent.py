@@ -13,17 +13,13 @@ from typing import Any, Dict, List, Optional, Sequence, cast
 import certifi
 
 from dotenv import load_dotenv
-try:  # Prefer the new langchain-huggingface package (LangChain>=0.2.2)
-    from langchain_huggingface import HuggingFaceEmbeddings  # type: ignore
-except ImportError:  # pragma: no cover - fallback for older environments
-    from langchain_community.embeddings import HuggingFaceEmbeddings  # type: ignore
 from langchain_community.utilities import SQLDatabase
 from langchain_community.vectorstores import FAISS
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import PromptTemplate
 from langchain_core.runnables import RunnablePassthrough
 from langchain_google_genai import ChatGoogleGenerativeAI
-from sqlalchemy import text
+from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 
 
@@ -54,6 +50,7 @@ os.environ["REQUESTS_CA_BUNDLE"] = str(DEFAULT_CERT_PATH)
 # --- Global initialization caches ---
 llm = None
 db = None
+db_engine: Optional[Engine] = None
 rag_chain = None
 conversation_chain = None
 
@@ -84,6 +81,29 @@ def _get_database_uri() -> str:
     db_name = os.getenv("DB_NAME", "float")
 
     return f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{db_name}"
+
+
+def _initialise_sql_engine() -> Engine:
+    global db_engine
+
+    if db_engine is not None:
+        return db_engine
+
+    database_uri = _get_database_uri()
+    try:
+        candidate_engine = create_engine(database_uri, pool_pre_ping=True)
+        with candidate_engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+    except Exception as exc:  # pragma: no cover - defensive guard
+        db_engine = None
+        logger.exception("Unable to establish PostgreSQL connection to %s", database_uri.rsplit("@", maxsplit=1)[-1])
+        raise ConfigError(
+            "Unable to connect to PostgreSQL. Double-check your DATABASE_URL/DB_* environment variables and ensure the database is reachable."
+        ) from exc
+
+    db_engine = candidate_engine
+    logger.info("PostgreSQL connection established.")
+    return db_engine
 
 
 def _get_faiss_index_path() -> str:
@@ -119,6 +139,19 @@ def _get_retriever_k(default: int = 6) -> int:
         return default
 
 
+def _load_embedding_model():
+    """Load the embedding model lazily to avoid heavy imports at module import time."""
+
+    embeddings_model_name = os.getenv("EMBEDDINGS_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
+
+    try:
+        from langchain_huggingface import HuggingFaceEmbeddings  # type: ignore
+    except ImportError:
+        from langchain_community.embeddings import HuggingFaceEmbeddings  # type: ignore
+
+    return HuggingFaceEmbeddings(model_name=embeddings_model_name)
+
+
 def _normalize_value(value: Any) -> Any:
     if isinstance(value, (datetime, date)):
         return value.isoformat()
@@ -132,6 +165,16 @@ def _normalize_records(records: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]
     for record in records:
         normalized.append({key: _normalize_value(value) for key, value in record.items()})
     return normalized
+
+
+def _looks_like_sql(query: str) -> bool:
+    """Light heuristic to guard against non-SQL model outputs."""
+
+    stripped = query.strip().lower()
+    if not stripped:
+        return False
+    starters = ("select", "with", "insert", "update", "delete", "create", "drop")
+    return stripped.startswith(starters)
 
 
 def _build_data_messages(
@@ -240,6 +283,35 @@ def _diagnose_exception(exc: Exception) -> Dict[str, Any]:
     return {"message": message, "metadata": metadata}
 
 
+def get_health_report() -> Dict[str, Any]:
+    """Return lightweight dependency health info without invoking the LLM."""
+
+    checks: Dict[str, Dict[str, Any]] = {}
+
+    api_key_present = bool(os.getenv("GOOGLE_API_KEY"))
+    checks["google_api_key"] = {
+        "ok": api_key_present,
+        "detail": "Present" if api_key_present else "Missing GOOGLE_API_KEY",
+    }
+
+    try:
+        engine = get_sql_engine()
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+        checks["database"] = {"ok": True, "detail": "Connected to PostgreSQL"}
+    except Exception as exc:
+        checks["database"] = {"ok": False, "detail": str(exc)}
+
+    try:
+        index_path = Path(_get_faiss_index_path()).resolve()
+        checks["faiss_index"] = {"ok": True, "detail": str(index_path)}
+    except Exception as exc:  # pragma: no cover - defensive guard
+        checks["faiss_index"] = {"ok": False, "detail": str(exc)}
+
+    overall_ok = all(item.get("ok", False) for item in checks.values())
+    return {"status": "ok" if overall_ok else "degraded", "checks": checks}
+
+
 def _initialise_components() -> Dict[str, Any]:
     logger.info("--- 🧠 Initializing FloatAI RAG AI Core (first run)... ---")
 
@@ -247,19 +319,14 @@ def _initialise_components() -> Dict[str, Any]:
 
     llm_instance = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.1)
 
-    database_uri = _get_database_uri()
-    try:
-        db_instance = SQLDatabase.from_uri(database_uri)
-        logger.info("Connected to PostgreSQL via SQLAlchemy engine.")
-    except Exception as exc:  # pragma: no cover - defensive guard
-        logger.exception("Unable to connect to PostgreSQL with URI ending %s", database_uri[-32:])
-        raise ConfigError(
-            "Unable to connect to PostgreSQL. Double-check your DATABASE_URL/DB_* environment variables."
-        ) from exc
-
+    # Load embeddings lazily here to avoid import-time transformer overhead.
     embeddings_model_name = os.getenv("EMBEDDINGS_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
-    logger.info("Loading embedding model %s", embeddings_model_name)
-    embedding_model = HuggingFaceEmbeddings(model_name=embeddings_model_name)
+    try:
+        embedding_model = _load_embedding_model()
+    except Exception as exc:  # pragma: no cover - defensive guard
+        logger.exception("Failed to load embedding model %s", embeddings_model_name)
+        raise ConfigError(f"Unable to load embeddings model '{embeddings_model_name}'.") from exc
+    logger.info("Embedding model ready: %s", embeddings_model_name)
 
     vector_store_path = _get_faiss_index_path()
     try:
@@ -304,55 +371,53 @@ def _initialise_components() -> Dict[str, Any]:
 
     return {
         "llm": llm_instance,
-        "db": db_instance,
         "rag_chain": rag_chain_instance,
         "conversation_chain": conversation_chain_instance,
     }
 
 
 def initialize_ai_core() -> None:
-    global llm, db, rag_chain, conversation_chain
+    global llm, rag_chain, conversation_chain
 
-    if all(component is not None for component in (llm, db, rag_chain, conversation_chain)):
+    if all(component is not None for component in (llm, rag_chain, conversation_chain)):
         return
 
     components = _initialise_components()
     llm = components["llm"]
-    db = components["db"]
     rag_chain = components["rag_chain"]
     conversation_chain = components["conversation_chain"]
 
 
-def get_sql_database() -> SQLDatabase:
-    """Return the shared SQLDatabase instance, ensuring initialization has occurred."""
-
-    initialize_ai_core()
-    if db is None:
-        raise RuntimeError("SQL database has not been initialized.")
-
-    if not isinstance(db, SQLDatabase):  # pragma: no cover - defensive guard
-        raise RuntimeError("Unexpected database instance type encountered.")
-
-    return cast(SQLDatabase, db)
-
-
 def get_sql_engine() -> Engine:
-    """Expose the underlying SQLAlchemy engine used by the LangChain SQLDatabase wrapper."""
+    """Return the shared SQLAlchemy engine without requiring the LLM components."""
 
-    sql_db = get_sql_database()
-    return sql_db._engine  # type: ignore[attr-defined]  # pylint: disable=protected-access
+    return _initialise_sql_engine()
+
+
+def get_sql_database() -> SQLDatabase:
+    """Return the shared SQLDatabase instance, ensuring the SQLAlchemy engine is ready."""
+
+    global db
+
+    if db is not None:
+        if not isinstance(db, SQLDatabase):  # pragma: no cover - defensive guard
+            raise RuntimeError("Unexpected database instance type encountered.")
+        return cast(SQLDatabase, db)
+
+    engine = get_sql_engine()
+    db = SQLDatabase(engine)  # type: ignore[arg-type]
+    return db
 
 
 def run_ai_pipeline(question: str) -> Dict[str, Any]:
     try:
         initialize_ai_core()
 
-        if not all((llm, db, rag_chain, conversation_chain)):
+        if not all((llm, rag_chain, conversation_chain)):
             raise RuntimeError("AI core components failed to initialize.")
 
         local_llm = cast(ChatGoogleGenerativeAI, llm)
         local_rag_chain = cast(Any, rag_chain)
-        local_db = cast(SQLDatabase, db)
         local_conversation_chain = cast(Any, conversation_chain)
 
         logger.info("Processing question: %s", question)
@@ -366,12 +431,28 @@ def run_ai_pipeline(question: str) -> Dict[str, Any]:
         logger.info("Detected intent: %s", intent)
 
         if "data_query" in intent:
+            sql_db = get_sql_database()
+            local_db = cast(SQLDatabase, sql_db)
+
             generated_sql = local_rag_chain.invoke(question)
             generated_sql = (
                 generated_sql.replace("```sql", "").replace("```", "").strip()
             )
             if not generated_sql:
                 raise RuntimeError("The RAG chain returned an empty SQL query.")
+
+            if not _looks_like_sql(generated_sql):
+                logger.info("Model returned non-SQL content; answering conversationally instead.")
+                response_text = local_conversation_chain.invoke({"question": question})
+                messages = _build_conversational_messages(str(response_text))
+                metadata = {"intent": "conversational_fallback", "question": question}
+                return {
+                    "sql_query": None,
+                    "result_data": str(response_text),
+                    "messages": messages,
+                    "metadata": metadata,
+                    "error": None,
+                }
 
             logger.info("Generated SQL: %s", generated_sql)
 

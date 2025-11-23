@@ -45,6 +45,34 @@ interface ChatInterfaceProps {
   variant?: "full" | "tray";
 }
 
+const SUGGESTIONS: Array<{ label: string; prompt: string; tone: "data" | "ops" | "narrative" }> = [
+  {
+    label: "Latest active floats",
+    prompt: "List the latest positions for 50 active floats with float_id, latitude, longitude, and last contact date.",
+    tone: "data",
+  },
+  {
+    label: "Profile snapshot",
+    prompt: "Show the most recent temperature profile for float 5905612 with depth and temperature.",
+    tone: "data",
+  },
+  {
+    label: "Fleet health",
+    prompt: "Summarize total floats, active vs delayed counts, and last ingest time.",
+    tone: "ops",
+  },
+  {
+    label: "North Atlantic slice",
+    prompt: "Give temperature and salinity averages for floats between 20N and 60N, -80W to 10E over the last 30 days.",
+    tone: "data",
+  },
+  {
+    label: "Explain FloatAI",
+    prompt: "What does this dashboard do and how should I start exploring the data?",
+    tone: "narrative",
+  },
+];
+
 const buildWelcomeMessage = (): Message => ({
   id: `welcome-${Date.now()}`,
   content: `Welcome to FloatAI — your ARGO mission copilot.
@@ -511,7 +539,7 @@ Let me know if you’d like to dive into any detail further or filter this view.
     });
   }, [onDataReceived, onBackendStatusChange, scrollToBottom]);
 
-  const visibleStatChips = isTray ? statChips.slice(0, 2) : statChips;
+    const visibleStatChips = isTray ? statChips.slice(0, 2) : statChips;
 
   return (
     <div className={`flex h-full min-h-0 flex-col ${isTray ? "gap-2.5 text-[0.95rem]" : "gap-5 text-sm"}`}>
@@ -661,6 +689,34 @@ Let me know if you’d like to dive into any detail further or filter this view.
         {!isTray && (
           <div className="mb-4 flex flex-wrap items-center gap-2 text-[0.65rem] uppercase tracking-[0.32em] text-slate-500 dark:text-slate-300">
             <span>Chat Composer</span>
+          </div>
+        )}
+        {!isTray && (
+          <div className="mb-3 grid gap-2 sm:grid-cols-2">
+            {SUGGESTIONS.map((item) => (
+              <button
+                key={item.label}
+                type="button"
+                onClick={() => {
+                  setInput(item.prompt);
+                  requestAnimationFrame(() => inputRef.current?.focus());
+                }}
+                className="group inline-flex items-center justify-between rounded-2xl border border-white/30 bg-white/70 px-4 py-2.5 text-left text-sm font-semibold text-slate-700 shadow-sm transition hover:-translate-y-0.5 hover:border-white/60 hover:shadow-[0_14px_36px_-26px_rgba(15,23,42,0.5)] dark:border-white/10 dark:bg-white/[0.06] dark:text-slate-100"
+              >
+                <span className="pr-3">{item.label}</span>
+                <span
+                  className={`rounded-full px-3 py-1 text-[0.65rem] uppercase tracking-[0.26em] ${
+                    item.tone === "data"
+                      ? "bg-sky-500/15 text-sky-200"
+                      : item.tone === "ops"
+                        ? "bg-emerald-500/15 text-emerald-200"
+                        : "bg-indigo-500/15 text-indigo-200"
+                  }`}
+                >
+                  {item.tone === "data" ? "Data" : item.tone === "ops" ? "Ops" : "Guide"}
+                </span>
+              </button>
+            ))}
           </div>
         )}
         <div className="flex flex-col gap-3">

@@ -297,13 +297,13 @@ function App() {
           return;
         }
 
-        const totalFloats = typeof stats?.total_floats === "number" ? stats.total_floats : Array.isArray(floats) ? floats.length : null;
-        const activeFloats = Array.isArray(floats)
-          ? floats.filter((item) => item.status?.toLowerCase() === "active").length
+        const totalFloats = typeof stats?.total_floats === "number" ? stats.total_floats : Array.isArray(floats.data) ? floats.data.length : null;
+        const activeFloats = Array.isArray(floats.data)
+          ? floats.data.filter((item) => item.status?.toLowerCase() === "active").length
           : null;
 
         const lastUpdated = stats?.last_updated
-          ?? (Array.isArray(floats) && floats.length ? floats[0]?.last_contact ?? null : null);
+          ?? (Array.isArray(floats.data) && floats.data.length ? floats.data[0]?.last_contact ?? null : null);
 
         setFleetOverview({
           totalFloats,
@@ -696,9 +696,9 @@ function App() {
           </section>
         </main>
 
-        <div className="fixed bottom-6 right-6 z-40 flex flex-col items-end gap-3">
+        <div className="fixed bottom-6 right-6 z-40 flex flex-col items-end gap-3 pointer-events-none">
           {showChatTray ? (
-            <div className="w-[480px] max-w-[95vw] max-h-[82vh] overflow-hidden rounded-3xl border border-white/20 bg-white/92 shadow-[0_26px_70px_-40px_rgba(15,23,42,0.65)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/92">
+            <div className="pointer-events-auto w-[480px] max-w-[95vw] max-h-[82vh] overflow-hidden rounded-3xl border border-white/20 bg-white/92 shadow-[0_26px_70px_-40px_rgba(15,23,42,0.65)] backdrop-blur-xl transition-all duration-200 ease-out dark:border-white/10 dark:bg-slate-900/92">
               <div className="relative flex h-[640px] max-h-[82vh] flex-col">
                 <button
                   type="button"
@@ -726,7 +726,7 @@ function App() {
             <button
               type="button"
               onClick={() => setShowChatTray(true)}
-              className="inline-flex items-center gap-2 rounded-full bg-slate-900/85 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-slate-900/40 backdrop-blur focus:outline-none focus-visible:ring-2 focus-visible:ring-white/70 dark:bg-white/20"
+              className="pointer-events-auto inline-flex items-center gap-2 rounded-full bg-slate-900/85 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-slate-900/40 backdrop-blur focus:outline-none focus-visible:ring-2 focus-visible:ring-white/70 dark:bg-white/20"
               aria-label="Open chat"
             >
               <svg

@@ -18,7 +18,7 @@ const RealTimeOceanMap = ({ filters, highlightedFloats = [] }: RealTimeOceanMapP
   const loadFloats = async () => {
     setLoading(true);
     try {
-  const data = await floatAIAPI.getArgoFloats(filters);
+      const { data } = await floatAIAPI.getArgoFloats(filters);
       setFloats(data);
     } catch (error) {
       console.error('Failed to load floats:', error);

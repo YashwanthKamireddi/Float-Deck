@@ -7,6 +7,7 @@ so we avoid bootstrapping LangChain components multiple times per request.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
@@ -16,7 +17,7 @@ from sqlalchemy.engine import Engine, Result
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.sql.elements import ColumnElement
 
-from .main_agent import get_sql_engine, initialize_ai_core
+from .main_agent import ConfigError, get_sql_engine
 
 
 @dataclass
@@ -31,6 +32,8 @@ class FloatFilters:
 class DataAccessError(RuntimeError):
     """Raised when the database cannot be queried for operational dashboards."""
 
+
+logger = logging.getLogger("floatai.data_access")
 
 _METADATA = MetaData()
 _ARGO_PROFILES: Optional[Table] = None
@@ -51,11 +54,19 @@ def _coerce_datetime(raw: Optional[Any]) -> Optional[datetime]:
     raise ValueError(f"Unexpected datetime payload: {raw!r}")
 
 
+def _get_engine() -> Engine:
+    try:
+        return get_sql_engine()
+    except ConfigError as exc:
+        raise DataAccessError(str(exc)) from exc
+    except Exception as exc:  # pragma: no cover - defensive guard
+        raise DataAccessError("Unable to establish database connection.") from exc
+
+
 def fetch_database_stats() -> Dict[str, Any]:
     """Return fleet-wide metrics consumed by the dashboard header."""
 
-    initialize_ai_core()
-    engine = get_sql_engine()
+    engine = _get_engine()
 
     try:
         with engine.connect() as connection:
@@ -104,8 +115,7 @@ def _match_status_filter(status: Optional[List[str]], candidate: str) -> bool:
 
 
 def fetch_float_catalog(filters: Optional[FloatFilters] = None, limit: int = 200) -> List[Dict[str, Any]]:
-    initialize_ai_core()
-    engine = get_sql_engine()
+    engine = _get_engine()
     table = _ensure_table(engine)
 
     filters = filters or FloatFilters()
@@ -185,8 +195,7 @@ def fetch_float_catalog(filters: Optional[FloatFilters] = None, limit: int = 200
 
 
 def fetch_float_profile(float_id: str, variable: str = "temperature") -> Dict[str, Any]:
-    initialize_ai_core()
-    engine = get_sql_engine()
+    engine = _get_engine()
     table = _ensure_table(engine)
 
     supported_variables = {"temperature", "salinity", "pressure"}
@@ -242,8 +251,7 @@ def fetch_float_profile(float_id: str, variable: str = "temperature") -> Dict[st
 
 
 def fetch_time_series(float_id: str, variable: str = "temperature", limit: int = 60) -> Dict[str, Any]:
-    initialize_ai_core()
-    engine = get_sql_engine()
+    engine = _get_engine()
     table = _ensure_table(engine)
 
     column = {
@@ -289,8 +297,7 @@ def fetch_time_series(float_id: str, variable: str = "temperature", limit: int =
 
 
 def fetch_float_trajectory(float_id: str, limit: int = 50) -> List[Dict[str, Any]]:
-    initialize_ai_core()
-    engine = get_sql_engine()
+    engine = _get_engine()
     table = _ensure_table(engine)
 
     stmt = (
@@ -336,8 +343,7 @@ def fetch_float_trajectory(float_id: str, limit: int = 50) -> List[Dict[str, Any
 
 
 def fetch_quality_report(float_id: str) -> List[Dict[str, Any]]:
-    initialize_ai_core()
-    engine = get_sql_engine()
+    engine = _get_engine()
     table = _ensure_table(engine)
 
     stmt = select(

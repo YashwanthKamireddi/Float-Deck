@@ -132,46 +132,20 @@ export interface DatabaseStats {
   dataset?: string | null;
 }
 
+export type DataSource = "live" | "sample";
+
+export interface ArgoFloatsResult {
+  data: ArgoFloat[];
+  source: DataSource;
+}
+
 const SAMPLE_FLOATS: ArgoFloat[] = [
-  {
-    id: "float_2903953",
-    lat: 40.7128,
-    lon: -74.006,
-    last_contact: "2024-01-15T00:00:00Z",
-    temperature: 18.5,
-    salinity: 35.2,
-    trajectory: [
-      [40.7, -74.0],
-      [40.8, -73.9],
-    ],
-    status: "active",
-  },
-  {
-    id: "float_4903838",
-    lat: 35.6762,
-    lon: 139.6503,
-    last_contact: "2024-01-14T00:00:00Z",
-    temperature: 22.1,
-    salinity: 34.8,
-    trajectory: [
-      [35.6, 139.7],
-      [35.7, 139.8],
-    ],
-    status: "active",
-  },
-  {
-    id: "float_7901125",
-    lat: -33.9249,
-    lon: 18.4241,
-    last_contact: "2024-01-13T00:00:00Z",
-    temperature: 16.3,
-    salinity: 35.0,
-    trajectory: [
-      [-33.9, 18.4],
-      [-33.8, 18.5],
-    ],
-    status: "delayed",
-  },
+  { id: "5905612", lat: -33.500, lon: 151.300, last_contact: "2025-11-20T12:00:00Z", temperature: 15.4, salinity: 35.1, trajectory: [[-33.50,151.30],[-33.45,151.32],[-33.40,151.35]], status: "active" },
+  { id: "5905613", lat: -12.100, lon: 145.200, last_contact: "2025-11-15T09:00:00Z", temperature: 12.9, salinity: 34.7, trajectory: [[-12.10,145.20],[-12.06,145.28],[-12.00,145.35]], status: "active" },
+  { id: "5905614", lat: 2.500, lon: -150.800, last_contact: "2025-10-05T18:00:00Z", temperature: 10.2, salinity: 34.9, trajectory: [[2.50,-150.80],[2.55,-150.70],[2.60,-150.60]], status: "delayed" },
+  { id: "3901774", lat: 46.500, lon: -17.800, last_contact: "2025-11-10T04:00:00Z", temperature: 9.1, salinity: 35.4, trajectory: [[46.45,-17.90],[46.50,-17.80],[46.60,-17.65]], status: "active" },
+  { id: "2902273", lat: 14.200, lon: -38.600, last_contact: "2025-11-18T07:00:00Z", temperature: 20.3, salinity: 36.1, trajectory: [[14.10,-38.70],[14.20,-38.60],[14.25,-38.55]], status: "active" },
+  { id: "3901621", lat: -47.800, lon: 12.400, last_contact: "2025-09-29T10:00:00Z", temperature: 6.4, salinity: 34.6, trajectory: [[-47.90,12.30],[-47.82,12.38],[-47.75,12.50]], status: "inactive" },
 ];
 
 const SAMPLE_PROFILE: ArgoProfile = {
@@ -273,14 +247,15 @@ export const floatAIAPI = {
     }
   },
 
-  async getArgoFloats(filters?: DataFilters): Promise<ArgoFloat[]> {
+  async getArgoFloats(filters?: DataFilters): Promise<ArgoFloatsResult> {
     try {
       const query = serializeFilters(filters);
       const path = query ? `floats?${query}` : "floats";
-      return await fetchJson<ArgoFloat[]>(path);
+      const data = await fetchJson<ArgoFloat[]>(path);
+      return { data, source: "live" };
     } catch (error) {
       console.warn("FloatAI API: falling back to sample float catalog", error);
-      return SAMPLE_FLOATS;
+      return { data: SAMPLE_FLOATS, source: "sample" };
     }
   },
 

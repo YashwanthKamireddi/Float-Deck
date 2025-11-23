@@ -41,34 +41,43 @@ const LandingPage = ({ onLaunch }: LandingPageProps) => (
         <div className="grid gap-6 lg:grid-cols-[1.4fr,1fr] lg:items-center">
           <div className="space-y-5">
               <h1 className="text-3xl font-semibold leading-tight md:text-5xl">
-                Conversational ocean intelligence for the ARGO fleet.
+                Run ARGO missions with conversational clarity.
               </h1>
-              <p className="text-lg text-subtle md:text-xl">
-                Ask plain questions. Get vetted SQL, live maps, and profile plots—no NetCDF manuals required.
+              <p className="text-lg text-subtle md:text-xl max-w-2xl">
+                Ask in plain English. Get audited SQL, live maps, and profile plots you can brief with confidence.
               </p>
             <div className="flex flex-wrap items-center gap-3">
               <Button size="lg" onClick={onLaunch} className="rounded-full bg-gradient-ocean px-6 text-sm font-semibold shadow-lg shadow-sky-500/25">
                 Launch command deck
                 <ArrowRight className="ml-2 h-4 w-4" />
               </Button>
-              <div className="text-sm text-subtle">Built for rapid ARGO/BGC situational awareness.</div>
+              <div className="text-sm text-subtle">Built for scientists, ops, and policy teams.</div>
+            </div>
+            <div className="flex flex-wrap gap-2 pt-1 text-[0.75rem] font-semibold text-slate-700 dark:text-slate-200">
+              <span className="rounded-full border border-white/20 bg-white/10 px-3 py-1 shadow-sm backdrop-blur">Audited SQL</span>
+              <span className="rounded-full border border-white/20 bg-white/10 px-3 py-1 shadow-sm backdrop-blur">Live fleet map</span>
+              <span className="rounded-full border border-white/20 bg-white/10 px-3 py-1 shadow-sm backdrop-blur">Profiles & trends</span>
             </div>
           </div>
           <div className="rounded-3xl border border-white/25 bg-white/75 p-5 shadow-[0_35px_70px_-50px_rgba(15,23,42,0.55)] backdrop-blur-2xl dark:border-white/10 dark:bg-white/[0.06]">
-            <div className="flex items-center gap-3 text-sm text-subtle">
+            <div className="flex items-center gap-2 text-sm text-subtle">
               <MessagesSquare className="h-4 w-4 text-sky-500" />
-              <span>Example intents</span>
+              <span className="font-semibold text-slate-700 dark:text-slate-200">Try a prompt</span>
             </div>
-            <ul className="mt-4 space-y-3 text-sm">
-              <li className="rounded-xl border border-white/30 bg-white/80 px-3 py-2 shadow-sm dark:border-white/10 dark:bg-white/[0.05]">
-                Show me salinity profiles near the equator in March 2023.
-              </li>
-              <li className="rounded-xl border border-white/30 bg-white/80 px-3 py-2 shadow-sm dark:border-white/10 dark:bg-white/[0.05]">
-                Compare BGC parameters in the Arabian Sea for the last 6 months.
-              </li>
-              <li className="rounded-xl border border-white/30 bg-white/80 px-3 py-2 shadow-sm dark:border-white/10 dark:bg-white/[0.05]">
-                What are the nearest ARGO floats to this location?
-              </li>
+            <ul className="mt-4 space-y-2 text-sm">
+              {[
+                "Show me salinity profiles near the equator in March 2023.",
+                "Compare BGC parameters in the Arabian Sea for the last 6 months.",
+                "What are the nearest ARGO floats to this location?",
+              ].map((prompt) => (
+                <li
+                  key={prompt}
+                  className="flex items-center justify-between gap-2 rounded-xl border border-white/25 bg-white/85 px-3 py-2 text-slate-800 shadow-sm transition hover:-translate-y-0.5 hover:border-sky-200/70 hover:shadow-[0_14px_32px_-22px_rgba(14,165,233,0.35)] dark:border-white/10 dark:bg-white/[0.06] dark:text-slate-100"
+                >
+                  <span className="pr-3">{prompt}</span>
+                  <ArrowRight className="h-4 w-4 text-slate-500 dark:text-slate-300" />
+                </li>
+              ))}
             </ul>
           </div>
         </div>
@@ -78,7 +87,7 @@ const LandingPage = ({ onLaunch }: LandingPageProps) => (
         {pillars.map((pillar) => (
           <div
             key={pillar.title}
-            className="flex flex-col gap-3 rounded-2xl border border-white/25 bg-white/80 p-5 shadow-[0_25px_60px_-45px_rgba(15,23,42,0.55)] backdrop-blur-2xl dark:border-white/10 dark:bg-white/[0.06]"
+            className="flex flex-col gap-3 rounded-2xl border border-white/25 bg-white/80 p-5 shadow-[0_25px_60px_-45px_rgba(15,23,42,0.55)] backdrop-blur-2xl transition duration-200 hover:-translate-y-1 hover:shadow-[0_28px_65px_-45px_rgba(15,23,42,0.6)] dark:border-white/10 dark:bg-white/[0.06]"
           >
             <pillar.icon className="h-5 w-5 text-sky-500" />
             <h3 className="text-lg font-semibold">{pillar.title}</h3>
@@ -93,7 +102,7 @@ const LandingPage = ({ onLaunch }: LandingPageProps) => (
           <h3 className="mt-2 text-xl font-semibold">How FloatAI answers a mission prompt</h3>
           <div className="mt-4 space-y-3">
             {steps.map((step) => (
-              <div key={step} className="flex items-start gap-3 rounded-xl border border-white/25 bg-white/80 px-3 py-2 shadow-sm dark:border-white/10 dark:bg-white/[0.05]">
+              <div key={step} className="flex items-start gap-3 rounded-xl border border-white/25 bg-white/80 px-3 py-2 shadow-sm transition hover:-translate-y-0.5 hover:border-sky-200/70 hover:shadow-[0_20px_48px_-32px_rgba(14,165,233,0.35)] dark:border-white/10 dark:bg-white/[0.05]">
                 <CheckCircle2 className="mt-0.5 h-4 w-4 text-emerald-500" />
                 <p className="text-sm text-slate-700 dark:text-slate-100">{step}</p>
               </div>
@@ -104,19 +113,19 @@ const LandingPage = ({ onLaunch }: LandingPageProps) => (
         <div className="rounded-3xl border border-white/25 bg-white/85 p-6 shadow-[0_30px_70px_-50px_rgba(15,23,42,0.55)] backdrop-blur-2xl dark:border-white/10 dark:bg-white/[0.06]">
           <p className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-500 dark:text-slate-300">At a glance</p>
           <div className="mt-4 grid gap-3 text-sm">
-            <div className="flex items-center justify-between rounded-xl border border-white/30 bg-white/75 px-3 py-2 dark:border-white/10 dark:bg-white/[0.05]">
+            <div className="flex items-center justify-between rounded-xl border border-white/30 bg-white/75 px-3 py-2 transition hover:-translate-y-0.5 hover:border-sky-200/70 dark:border-white/10 dark:bg-white/[0.05]">
               <span className="text-subtle">Data coverage</span>
               <span className="font-semibold text-slate-900 dark:text-white">Global ARGO + BGC floats</span>
             </div>
-            <div className="flex items-center justify-between rounded-xl border border-white/30 bg-white/75 px-3 py-2 dark:border-white/10 dark:bg-white/[0.05]">
+            <div className="flex items-center justify-between rounded-xl border border-white/30 bg-white/75 px-3 py-2 transition hover:-translate-y-0.5 hover:border-sky-200/70 dark:border-white/10 dark:bg-white/[0.05]">
               <span className="text-subtle">Modalities</span>
               <span className="font-semibold text-slate-900 dark:text-white">Maps · Profiles · Time series · SQL</span>
             </div>
-            <div className="flex items-center justify-between rounded-xl border border-white/30 bg-white/75 px-3 py-2 dark:border-white/10 dark:bg-white/[0.05]">
+            <div className="flex items-center justify-between rounded-xl border border-white/30 bg-white/75 px-3 py-2 transition hover:-translate-y-0.5 hover:border-sky-200/70 dark:border-white/10 dark:bg-white/[0.05]">
               <span className="text-subtle">Guardrails</span>
               <span className="font-semibold text-slate-900 dark:text-white">Provenance-linked SQL + fallbacks</span>
             </div>
-            <div className="flex items-center justify-between rounded-xl border border-white/30 bg-white/75 px-3 py-2 dark:border-white/10 dark:bg-white/[0.05]">
+            <div className="flex items-center justify-between rounded-xl border border-white/30 bg-white/75 px-3 py-2 transition hover:-translate-y-0.5 hover:border-sky-200/70 dark:border-white/10 dark:bg-white/[0.05]">
               <span className="text-subtle">Interfaces</span>
               <span className="font-semibold text-slate-900 dark:text-white">Chat · Command palette · Filters</span>
             </div>

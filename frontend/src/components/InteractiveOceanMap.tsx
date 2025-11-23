@@ -187,6 +187,7 @@ const PlotFallback = ({ label }: { label: string }) => (
 
 const InteractiveOceanMap = ({ filters, highlightedFloats = [], queryPoints = [] }: InteractiveOceanMapProps) => {
   const [floats, setFloats] = useState<ArgoFloat[]>([]);
+  const [dataSource, setDataSource] = useState<"live" | "sample">("live");
   const [statusFilters, setStatusFilters] = useState<StatusKey[]>(DEFAULT_STATUS_FILTERS);
   const [searchTerm, setSearchTerm] = useState("");
   const [isLoading, setIsLoading] = useState(true);
@@ -265,8 +266,9 @@ const InteractiveOceanMap = ({ filters, highlightedFloats = [], queryPoints = []
       if (normalizedStatus.length > 0 && normalizedStatus.length !== DEFAULT_STATUS_FILTERS.length) {
         requestFilters.status = normalizedStatus;
       }
-      const catalog = await floatAIAPI.getArgoFloats(requestFilters);
+      const { data: catalog, source } = await floatAIAPI.getArgoFloats(requestFilters);
       setFloats(catalog);
+      setDataSource(source);
       if (!catalog.length) {
         setSelectedFloatId(null);
         setSelectedFloat(null);
@@ -418,6 +420,11 @@ const InteractiveOceanMap = ({ filters, highlightedFloats = [], queryPoints = []
             <Badge variant="secondary" className="text-xs uppercase tracking-wider">
               {visibleBadgeLabel}
             </Badge>
+            {dataSource === "sample" && (
+              <Badge variant="outline" className="text-xs uppercase tracking-wider text-amber-700 border-amber-200 bg-amber-50/70 dark:text-amber-200 dark:border-amber-500/40 dark:bg-amber-500/10">
+                Sample fallback
+              </Badge>
+            )}
             <Button onClick={refreshFloats} disabled={isLoading} size="sm" variant="outline">
               <RefreshCw className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
             </Button>

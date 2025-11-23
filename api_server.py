@@ -1,6 +1,7 @@
 # This script creates a FastAPI server to expose our AI pipeline to the web.
 # This is the "engine" that our frontend will talk to.
 
+import logging
 import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -22,9 +23,14 @@ from ai_core.data_access import (
     fetch_quality_report,
     fetch_time_series,
 )
+from ai_core.main_agent import get_health_report
+from ai_core import sample_data
 from ai_core.main_agent import run_ai_pipeline
 
 # Load backend environment variables once at startup.
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+logger = logging.getLogger("floatai.api")
+
 load_dotenv()
 
 # Create the FastAPI app instance
@@ -120,6 +126,11 @@ class TrajectoryPoint(BaseModel):
     salinity: Optional[float] = None
     pressure: Optional[float] = None
 
+
+class HealthResponse(BaseModel):
+    status: str
+    checks: Dict[str, Any]
+
 # --- API Endpoint ---
 @app.post("/api/ask", response_model=QueryResponse)
 async def ask_question(request: QueryRequest) -> QueryResponse:
@@ -127,7 +138,7 @@ async def ask_question(request: QueryRequest) -> QueryResponse:
     This is the main endpoint for the application. It receives a question,
     runs it through the AI pipeline, and returns the result.
     """
-    print(f"Received question via API: {request.question}")
+    logger.info("Received question via API: %s", request.question)
     response_payload = run_ai_pipeline(request.question)
     return QueryResponse.model_validate(response_payload)
 
@@ -141,12 +152,21 @@ def _parse_iso_dt(value: Optional[str]) -> Optional[datetime]:
         raise HTTPException(status_code=400, detail=f"Invalid datetime format: {value}") from exc
 
 
+@app.get("/api/health", response_model=HealthResponse)
+async def get_health() -> HealthResponse:
+    """
+    Lightweight readiness probe that surfaces configuration issues without invoking the LLM.
+    """
+    return HealthResponse.model_validate(get_health_report())
+
+
 @app.get("/api/stats", response_model=DatabaseStats)
 async def get_database_stats() -> DatabaseStats:
     try:
         stats = fetch_database_stats()
     except DataAccessError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        logger.warning("Falling back to sample stats: %s", exc)
+        stats = sample_data.stats()
     return DatabaseStats.model_validate(stats)
 
 
@@ -170,7 +190,8 @@ async def list_floats(
     try:
         catalog = fetch_float_catalog(filters=filters, limit=limit)
     except DataAccessError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        logger.warning("Falling back to sample float catalog: %s", exc)
+        catalog = sample_data.float_catalog()
 
     return [FloatSummary.model_validate(item) for item in catalog]
 
@@ -180,7 +201,8 @@ async def get_float_profile(float_id: str, variable: str) -> FloatProfileRespons
     try:
         profile = fetch_float_profile(float_id, variable)
     except DataAccessError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        logger.warning("Falling back to sample profile for %s: %s", float_id, exc)
+        profile = sample_data.profile(variable)
 
     return FloatProfileResponse.model_validate(profile)
 
@@ -190,7 +212,8 @@ async def get_float_time_series(float_id: str, variable: str = Query(default="te
     try:
         payload = fetch_time_series(float_id, variable)
     except DataAccessError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        logger.warning("Falling back to sample time series for %s: %s", float_id, exc)
+        payload = sample_data.time_series(variable)
 
     return TimeSeriesPayload.model_validate(payload)
 
@@ -200,7 +223,8 @@ async def get_float_quality(float_id: str) -> List[DataQualityMetric]:
     try:
         metrics = fetch_quality_report(float_id)
     except DataAccessError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        logger.warning("Falling back to sample quality metrics for %s: %s", float_id, exc)
+        metrics = sample_data.quality()
 
     return [DataQualityMetric.model_validate(metric) for metric in metrics]
 
@@ -213,7 +237,8 @@ async def get_float_trajectory(
     try:
         waypoints = fetch_float_trajectory(float_id=float_id, limit=limit)
     except DataAccessError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        logger.warning("Falling back to sample trajectory for %s: %s", float_id, exc)
+        waypoints = sample_data.trajectory()
 
     return [TrajectoryPoint.model_validate(point) for point in waypoints]
 
