@@ -5,11 +5,12 @@ netCDF4
 SQLAlchemy
 psycopg2-binary
 
-# AI Squad Libraries
-langchain
-langchain-community
-langchain-huggingface
-langchain-google-genai
+# AI Squad Libraries (pinned for compatibility)
+langchain-core==0.2.10
+langchain==0.2.10
+langchain-community==0.2.9
+langchain-huggingface==0.0.3
+langchain-google-genai==1.0.6
 sentence-transformers
 google-generativeai
 faiss-cpu
