@@ -14,8 +14,8 @@
       "NODE_ENV": "production"
     }
   },
-  "installCommand": "npm install",
-  "buildCommand": "npm run build",
+  "installCommand": "npm install --prefix frontend",
+  "buildCommand": "npm run build --prefix frontend",
   "outputDirectory": "frontend/dist",
   "framework": "vite",
   "routes": [
