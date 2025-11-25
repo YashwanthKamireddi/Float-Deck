@@ -24,7 +24,11 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
+      buffer: "buffer/",
     },
+  },
+  optimizeDeps: {
+    include: ["buffer"],
   },
   build: {
     chunkSizeWarningLimit: 6000,
