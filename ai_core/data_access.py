@@ -119,6 +119,7 @@ def fetch_float_catalog(filters: Optional[FloatFilters] = None, limit: int = 200
     table = _ensure_table(engine)
 
     filters = filters or FloatFilters()
+    safe_limit = max(1, min(limit, 1000))
 
     ranked = select(
         table.c.float_id,
@@ -163,7 +164,7 @@ def fetch_float_catalog(filters: Optional[FloatFilters] = None, limit: int = 200
         .where(latest.c.profile_rank == 1)
         .group_by(latest.c.float_id)
         .order_by(desc("last_contact"))
-        .limit(limit)
+        .limit(safe_limit)
     )
 
     try:
@@ -198,7 +199,9 @@ def fetch_float_profile(float_id: str, variable: str = "temperature") -> Dict[st
     engine = _get_engine()
     table = _ensure_table(engine)
 
+    normalized_variable = (variable or "").strip().lower()
     supported_variables = {"temperature", "salinity", "pressure"}
+    variable = normalized_variable or "temperature"
     if variable not in supported_variables:
         raise DataAccessError(f"Unsupported variable '{variable}'. Choose from {', '.join(sorted(supported_variables))}.")
 
@@ -254,6 +257,8 @@ def fetch_time_series(float_id: str, variable: str = "temperature", limit: int =
     engine = _get_engine()
     table = _ensure_table(engine)
 
+    safe_limit = max(1, min(limit, 200))
+
     column = {
         "temperature": table.c.temperature,
         "salinity": table.c.salinity,
@@ -272,7 +277,7 @@ def fetch_time_series(float_id: str, variable: str = "temperature", limit: int =
         )
         .where(table.c.float_id == float_id)
         .order_by(table.c.profile_date.desc())
-        .limit(limit)
+        .limit(safe_limit)
     )
 
     try:
@@ -300,6 +305,8 @@ def fetch_float_trajectory(float_id: str, limit: int = 50) -> List[Dict[str, Any
     engine = _get_engine()
     table = _ensure_table(engine)
 
+    safe_limit = max(2, min(limit, 200))
+
     stmt = (
         select(
             table.c.latitude,
@@ -312,7 +319,7 @@ def fetch_float_trajectory(float_id: str, limit: int = 50) -> List[Dict[str, Any
         .where(table.c.float_id == float_id)
         .where(table.c.latitude.is_not(None), table.c.longitude.is_not(None))
         .order_by(table.c.profile_date.desc())
-        .limit(limit)
+        .limit(safe_limit)
     )
 
     try:

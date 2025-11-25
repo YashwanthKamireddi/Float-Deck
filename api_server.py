@@ -3,13 +3,17 @@
 
 import logging
 import os
+import time
+import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
+from starlette.concurrency import run_in_threadpool
 import uvicorn
 
 # We import the brain of our application from the ai_core module
@@ -23,9 +27,15 @@ from ai_core.data_access import (
     fetch_quality_report,
     fetch_time_series,
 )
-from ai_core.main_agent import get_health_report
+from ai_core.main_agent import ConfigError, get_health_report, run_ai_pipeline
 from ai_core import sample_data
-from ai_core.main_agent import run_ai_pipeline
+from ai_core.config import get_settings
+import threading
+
+settings = get_settings()
+_RATE_LIMIT_WINDOW = 60.0
+_rate_lock = threading.Lock()
+_rate_cache: dict[str, list[float]] = {}
 
 # Load backend environment variables once at startup.
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -43,7 +53,7 @@ app = FastAPI(
 # --- CORS Middleware ---
 # This is a critical security step. It allows your frontend application (running on a different port)
 # to make requests to this backend server.
-cors_origins_env = os.getenv("BACKEND_CORS_ORIGINS", "*")
+cors_origins_env = settings.cors_origins or "*"
 parsed_origins = [origin.strip() for origin in cors_origins_env.split(",") if origin.strip()]
 allow_all_origins = "*" in parsed_origins
 
@@ -55,9 +65,69 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.middleware("http")
+async def add_request_context(request: Request, call_next):
+    request_id = request.headers.get("x-request-id") or uuid.uuid4().hex
+    start_time = time.perf_counter()
+    response = None
+    try:
+        response = await call_next(request)
+    except Exception:  # pragma: no cover - defensive
+        logger.exception("Request failed: %s %s", request.method, request.url.path)
+        raise
+    finally:
+        duration_ms = (time.perf_counter() - start_time) * 1000
+        logger.info(
+            "HTTP %s %s completed in %.2f ms",
+            request.method,
+            request.url.path,
+            duration_ms,
+        )
+    if response is not None:
+        response.headers["X-Request-ID"] = request_id
+    return response or JSONResponse(status_code=500, content={"detail": "Internal server error"})
+
+
+def _enforce_rate_limit(request: Request) -> None:
+    limit = max(1, settings.rate_limit_per_minute)
+    key = request.client.host if request.client else "unknown"
+    now = time.monotonic()
+    window_start = now - _RATE_LIMIT_WINDOW
+
+    with _rate_lock:
+        history = _rate_cache.get(key, [])
+        history = [ts for ts in history if ts >= window_start]
+        if len(history) >= limit:
+            raise HTTPException(status_code=429, detail="Rate limit exceeded. Try again shortly.")
+        history.append(now)
+        _rate_cache[key] = history
+
+
+def enforce_auth_and_rate_limit(request: Request) -> None:
+    shared_key = settings.api_shared_key
+    if shared_key:
+        provided = request.headers.get("x-api-key")
+        if not provided or provided != shared_key:
+            raise HTTPException(status_code=401, detail="Invalid or missing API key.")
+
+    _enforce_rate_limit(request)
+
+
+@app.exception_handler(ConfigError)
+async def handle_config_error(request: Request, exc: ConfigError):  # pragma: no cover - defensive
+    logger.warning("Configuration error: %s", exc)
+    return JSONResponse(status_code=500, content={"detail": str(exc)})
+
+
+@app.exception_handler(DataAccessError)
+async def handle_data_access_error(request: Request, exc: DataAccessError):  # pragma: no cover - defensive
+    logger.warning("Data access error: %s", exc)
+    return JSONResponse(status_code=503, content={"detail": str(exc)})
+
 # --- Pydantic Models for a clear API contract ---
 class QueryRequest(BaseModel):
-    question: str
+    question: str = Field(..., min_length=1, max_length=600)
 
 
 class AssistantMessage(BaseModel):
@@ -133,13 +203,22 @@ class HealthResponse(BaseModel):
 
 # --- API Endpoint ---
 @app.post("/api/ask", response_model=QueryResponse)
-async def ask_question(request: QueryRequest) -> QueryResponse:
+async def ask_question(request: QueryRequest, _: None = Depends(enforce_auth_and_rate_limit)) -> QueryResponse:
     """
     This is the main endpoint for the application. It receives a question,
     runs it through the AI pipeline, and returns the result.
     """
-    logger.info("Received question via API: %s", request.question)
-    response_payload = run_ai_pipeline(request.question)
+    cleaned_question = request.question.strip()
+    if not cleaned_question:
+        raise HTTPException(status_code=422, detail="Question cannot be empty.")
+
+    logger.info("Received question via API")
+    try:
+        response_payload = await run_in_threadpool(run_ai_pipeline, cleaned_question)
+    except Exception as exc:  # pragma: no cover - defensive guard
+        logger.exception("ask_question failed")
+        raise HTTPException(status_code=500, detail="Unexpected error processing question.") from exc
+
     return QueryResponse.model_validate(response_payload)
 
 
@@ -153,7 +232,7 @@ def _parse_iso_dt(value: Optional[str]) -> Optional[datetime]:
 
 
 @app.get("/api/health", response_model=HealthResponse)
-async def get_health() -> HealthResponse:
+async def get_health(_: None = Depends(enforce_auth_and_rate_limit)) -> HealthResponse:
     """
     Lightweight readiness probe that surfaces configuration issues without invoking the LLM.
     """
@@ -161,7 +240,7 @@ async def get_health() -> HealthResponse:
 
 
 @app.get("/api/stats", response_model=DatabaseStats)
-async def get_database_stats() -> DatabaseStats:
+async def get_database_stats(_: None = Depends(enforce_auth_and_rate_limit)) -> DatabaseStats:
     try:
         stats = fetch_database_stats()
     except DataAccessError as exc:
@@ -172,6 +251,7 @@ async def get_database_stats() -> DatabaseStats:
 
 @app.get("/api/floats", response_model=List[FloatSummary])
 async def list_floats(
+    _: None = Depends(enforce_auth_and_rate_limit),
     float_ids: Optional[str] = Query(default=None, description="Comma-separated list of float IDs to include."),
     status: Optional[str] = Query(default=None, description="Comma-separated list of status filters (active, delayed, inactive)."),
     start: Optional[str] = Query(default=None, description="ISO timestamp lower bound for profile_date."),
@@ -197,7 +277,7 @@ async def list_floats(
 
 
 @app.get("/api/floats/{float_id}/profiles/{variable}", response_model=FloatProfileResponse)
-async def get_float_profile(float_id: str, variable: str) -> FloatProfileResponse:
+async def get_float_profile(float_id: str, variable: str, _: None = Depends(enforce_auth_and_rate_limit)) -> FloatProfileResponse:
     try:
         profile = fetch_float_profile(float_id, variable)
     except DataAccessError as exc:
@@ -208,9 +288,14 @@ async def get_float_profile(float_id: str, variable: str) -> FloatProfileRespons
 
 
 @app.get("/api/floats/{float_id}/timeseries", response_model=TimeSeriesPayload)
-async def get_float_time_series(float_id: str, variable: str = Query(default="temperature")) -> TimeSeriesPayload:
+async def get_float_time_series(
+    float_id: str,
+    variable: str = Query(default="temperature"),
+    limit: int = Query(default=60, ge=1, le=200),
+    _: None = Depends(enforce_auth_and_rate_limit),
+) -> TimeSeriesPayload:
     try:
-        payload = fetch_time_series(float_id, variable)
+        payload = fetch_time_series(float_id, variable, limit=limit)
     except DataAccessError as exc:
         logger.warning("Falling back to sample time series for %s: %s", float_id, exc)
         payload = sample_data.time_series(variable)
@@ -219,7 +304,7 @@ async def get_float_time_series(float_id: str, variable: str = Query(default="te
 
 
 @app.get("/api/floats/{float_id}/quality", response_model=List[DataQualityMetric])
-async def get_float_quality(float_id: str) -> List[DataQualityMetric]:
+async def get_float_quality(float_id: str, _: None = Depends(enforce_auth_and_rate_limit)) -> List[DataQualityMetric]:
     try:
         metrics = fetch_quality_report(float_id)
     except DataAccessError as exc:
@@ -233,6 +318,7 @@ async def get_float_quality(float_id: str) -> List[DataQualityMetric]:
 async def get_float_trajectory(
     float_id: str,
     limit: int = Query(default=50, ge=2, le=200, description="Number of historical fixes to return."),
+    _: None = Depends(enforce_auth_and_rate_limit),
 ) -> List[TrajectoryPoint]:
     try:
         waypoints = fetch_float_trajectory(float_id=float_id, limit=limit)

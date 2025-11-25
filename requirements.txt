@@ -21,6 +21,7 @@ uvicorn[standard]
 python-dotenv
 pydantic
 certifi
+pytest
 
 # Frontend Squad Libraries
 streamlit

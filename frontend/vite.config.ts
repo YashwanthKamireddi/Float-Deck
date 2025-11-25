@@ -26,4 +26,16 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+  build: {
+    chunkSizeWarningLimit: 6000,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          plotly: ["react-plotly.js", "plotly.js"],
+          leaflet: ["leaflet", "react-leaflet"],
+          lucide: ["lucide-react"],
+        },
+      },
+    },
+  },
 });

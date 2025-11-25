@@ -584,7 +584,13 @@ Let me know if you’d like to dive into any detail further or filter this view.
       <div className="relative flex-1 min-h-0">
         <ScrollArea
           ref={scrollAreaRef}
-          className={`data-scroll h-full ${isTray ? "max-h-[70vh]" : "max-h-[calc(100vh-260px)]"} flex-1 rounded-[24px] border border-white/20 bg-white/55 ${isTray ? "p-3.5" : "p-5"} shadow-[0_34px_68px_-42px_rgba(15,23,42,0.55)] backdrop-blur-xl dark:border-white/10 dark:bg-white/[0.04]`}
+          className={cn(
+            "data-scroll h-full flex-1 rounded-[24px]",
+            isTray ? "max-h-[70vh]" : "max-h-[calc(100vh-260px)]",
+            isTray
+              ? "border border-white/10 bg-white/20 p-3.5 shadow-[0_18px_36px_-28px_rgba(15,23,42,0.45)] backdrop-blur-sm dark:border-white/[0.08] dark:bg-white/[0.06]"
+              : "border border-white/20 bg-white/55 p-5 shadow-[0_34px_68px_-42px_rgba(15,23,42,0.55)] backdrop-blur-xl dark:border-white/10 dark:bg-white/[0.04]"
+          )}
         >
           <div
             className={`flex flex-col ${isTray ? "gap-4 pr-4" : "gap-6 pr-6 sm:pr-8"}`}

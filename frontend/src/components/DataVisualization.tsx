@@ -5,12 +5,13 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import CodeSnippet from "./CodeSnippet";
 import InteractiveOceanMap from "@/components/InteractiveOceanMap";
-import { lazy, Suspense, useMemo } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
-import { BarChart2, Globe2, LineChart } from "lucide-react";
+import { BarChart2, Globe2, LineChart, Code2, Copy, Check } from "lucide-react";
 import type { DataFilters } from "@/services/api";
 
 const Plot = lazy(() => import("react-plotly.js"));
@@ -93,6 +94,23 @@ const extractNumericValues = (rows: Record<string, any>[], key: string) =>
     .map((row) => (typeof row[key] === "number" && !Number.isNaN(row[key]) ? (row[key] as number) : null))
     .filter((value): value is number => value !== null);
 
+const normalizeCoordinate = (row: Record<string, any>, keys: string[]) => {
+  for (const key of keys) {
+    const value = row[key];
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value;
+    }
+
+    if (typeof value === "string") {
+      const parsed = Number.parseFloat(value);
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
+    }
+  }
+  return null;
+};
+
 const PlotFallback = ({ label }: { label: string }) => (
   <div className="flex h-full min-h-[260px] w-full items-center justify-center text-[0.65rem] uppercase tracking-[0.28em] text-subtle">
     {label}
@@ -109,6 +127,19 @@ const DataVisualization = ({
   activeTab,
   onTabChange,
 }: DataVisualizationProps) => {
+  const [copiedSql, setCopiedSql] = useState(false);
+
+  useEffect(() => {
+    const allowedTabs = ["analysis", "map", "profiles", "sql"];
+    if (!allowedTabs.includes(activeTab)) {
+      onTabChange("analysis");
+    }
+  }, [activeTab, onTabChange]);
+
+  const safeActiveTab = useMemo(() => {
+    const allowed = new Set(["analysis", "map", "profiles", "sql"]);
+    return allowed.has(activeTab) ? activeTab : "analysis";
+  }, [activeTab]);
 
   const filteredData = useMemo(() => {
     if (mode !== "expert") {
@@ -137,47 +168,45 @@ const DataVisualization = ({
 
   const workingData = filteredData;
 
-    const mapFilters = useMemo<DataFilters | undefined>(() => {
-      const next: DataFilters = {};
-      if (filters.floatId) {
-        next.floatIds = [filters.floatId];
-      }
-      if (filters.focusMetric) {
-        next.parameter = filters.focusMetric;
-      }
-      return Object.keys(next).length ? next : undefined;
-    }, [filters.floatId, filters.focusMetric]);
+  const mapFilters = useMemo<DataFilters | undefined>(() => {
+    const next: DataFilters = {};
+    if (filters.floatId) {
+      next.floatIds = [filters.floatId];
+    }
+    if (filters.focusMetric) {
+      next.parameter = filters.focusMetric;
+    }
+    return Object.keys(next).length ? next : undefined;
+  }, [filters.floatId, filters.focusMetric]);
 
-    const highlightedFloatIds = useMemo(() => {
-      if (filters.floatId) {
-        return [filters.floatId];
-      }
+  const highlightedFloatIds = useMemo(() => {
+    if (filters.floatId) {
+      return [filters.floatId];
+    }
 
-      const ids = new Set<string>();
-      for (const row of workingData) {
-        const candidate = row.float_id ?? row.float ?? row.id;
-        if (typeof candidate === "string" && candidate.trim()) {
-          ids.add(candidate.trim());
-        } else if (typeof candidate === "number" && Number.isFinite(candidate)) {
-          ids.add(String(candidate));
-        }
-
-        if (ids.size >= 12) {
-          break;
-        }
+    const ids = new Set<string>();
+    for (const row of workingData) {
+      const candidate = row.float_id ?? row.float ?? row.id;
+      if (typeof candidate === "string" && candidate.trim()) {
+        ids.add(candidate.trim());
+      } else if (typeof candidate === "number" && Number.isFinite(candidate)) {
+        ids.add(String(candidate));
       }
 
-      return Array.from(ids);
-    }, [filters.floatId, workingData]);
+      if (ids.size >= 12) {
+        break;
+      }
+    }
+
+    return Array.from(ids);
+  }, [filters.floatId, workingData]);
 
   const locationPoints = useMemo(
     () =>
       workingData
         .map((row) => {
-          const rawLat = row.latitude;
-          const rawLon = row.longitude;
-          const lat = typeof rawLat === "number" ? rawLat : Number.parseFloat(rawLat);
-          const lon = typeof rawLon === "number" ? rawLon : Number.parseFloat(rawLon);
+          const lat = normalizeCoordinate(row, ["latitude", "lat"]);
+          const lon = normalizeCoordinate(row, ["longitude", "lon", "lng"]);
 
           if (Number.isFinite(lat) && Number.isFinite(lon)) {
             return {
@@ -288,6 +317,41 @@ const DataVisualization = ({
     const [min, max] = filters.depthRange;
     return (min !== null && min > depthBounds.min) || (max !== null && max < depthBounds.max);
   }, [depthBounds, filters.depthRange]);
+
+  const trimmedSql = sqlQuery.trim();
+  const hasSql = trimmedSql.length > 0;
+
+  const sqlLineCount = useMemo(
+    () => (hasSql ? trimmedSql.split(/\r?\n/).length : 0),
+    [hasSql, trimmedSql],
+  );
+
+  const filterSummary = useMemo(() => {
+    const parts: string[] = [];
+    if (filters.floatId) {
+      parts.push(`Float ${filters.floatId}`);
+    }
+    if (isDepthFiltered) {
+      const [minDepth, maxDepth] = depthSliderValue;
+      parts.push(`${Math.round(minDepth)}–${Math.round(maxDepth)} dbar`);
+    }
+    if (filters.focusMetric) {
+      parts.push(metricLabels[filters.focusMetric]);
+    }
+    return parts.length ? parts.join(" • ") : "None";
+  }, [depthSliderValue, filters.floatId, filters.focusMetric, isDepthFiltered]);
+
+  const handleCopySql = useCallback(() => {
+    if (!hasSql) return;
+
+    navigator.clipboard
+      ?.writeText(trimmedSql)
+      .then(() => {
+        setCopiedSql(true);
+        window.setTimeout(() => setCopiedSql(false), 1200);
+      })
+      .catch(() => setCopiedSql(false));
+  }, [hasSql, trimmedSql]);
 
   // This is the view when the app first loads or when a query returns no data.
   if (data.length === 0) {
@@ -453,8 +517,8 @@ const DataVisualization = ({
         </div>
       )}
 
-      <Tabs value={activeTab} onValueChange={onTabChange} className="flex flex-1 min-h-0 flex-col gap-6">
-  <TabsList className="mx-auto inline-flex h-auto shrink-0 flex-wrap items-center justify-center gap-2 bg-transparent p-0 text-inherit">
+      <Tabs value={safeActiveTab} onValueChange={onTabChange} className="flex flex-1 min-h-0 flex-col gap-6">
+        <TabsList className="mx-auto inline-flex h-auto shrink-0 flex-wrap items-center justify-center gap-2 bg-transparent p-0 text-inherit">
           <TabsTrigger value="analysis" className="flex items-center justify-center gap-2 whitespace-nowrap rounded-xl px-4 py-2 text-center text-xs font-medium uppercase tracking-[0.28em] text-slate-500 transition data-[state=active]:bg-white data-[state=active]:text-slate-900 data-[state=active]:shadow-sm dark:data-[state=active]:bg-white/10 dark:data-[state=active]:text-white">
             <span className="inline-flex h-4 w-4 items-center justify-center"><BarChart2 className="h-3.5 w-3.5" /></span>
             Analysis
@@ -467,9 +531,13 @@ const DataVisualization = ({
             <span className="inline-flex h-4 w-4 items-center justify-center"><LineChart className="h-3.5 w-3.5" /></span>
             Profiles
           </TabsTrigger>
+          <TabsTrigger value="sql" className="flex items-center justify-center gap-2 whitespace-nowrap rounded-xl px-4 py-2 text-center text-xs font-medium uppercase tracking-[0.28em] text-slate-500 transition data-[state=active]:bg-white data-[state=active]:text-slate-900 data-[state=active]:shadow-sm dark:data-[state=active]:bg-white/10 dark:data-[state=active]:text-white">
+            <span className="inline-flex h-4 w-4 items-center justify-center"><Code2 className="h-3.5 w-3.5" /></span>
+            SQL
+          </TabsTrigger>
         </TabsList>
 
-        {activeTab === "analysis" && (
+        {safeActiveTab === "analysis" && (
           <TabsContent value="analysis" className="mt-2 flex flex-1 min-h-0 flex-col overflow-hidden rounded-[28px] border border-white/20 bg-white/85 p-6 shadow-[0_35px_70px_-50px_rgba(15,23,42,0.55)] backdrop-blur-2xl dark:border-white/10 dark:bg-white/[0.05] dark:shadow-[0_45px_90px_-55px_rgba(2,6,23,0.85)]">
             <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-100">Raw data {`(${workingData.length} records)`}</h3>
             {workingData.length === 0 ? (
@@ -509,7 +577,7 @@ const DataVisualization = ({
           </TabsContent>
         )}
 
-        {activeTab === "map" && (
+        {safeActiveTab === "map" && (
           <TabsContent value="map" className="mt-2 flex flex-1 min-h-0 overflow-hidden">
             <div className="flex flex-1 flex-col gap-4 overflow-hidden rounded-[28px] border border-white/5 bg-white/[0.03] p-4 shadow-[0_25px_60px_-50px_rgba(15,23,42,0.6)] backdrop-blur-xl dark:border-white/10 dark:bg-white/[0.03]">
               <InteractiveOceanMap
@@ -526,7 +594,83 @@ const DataVisualization = ({
           </TabsContent>
         )}
 
-        {activeTab === "profiles" && (
+        {safeActiveTab === "sql" && (
+          <TabsContent value="sql" className="mt-2 flex flex-1 min-h-0 flex-col gap-5 overflow-hidden rounded-[28px] border border-white/20 bg-white/90 p-6 shadow-[0_35px_70px_-50px_rgba(15,23,42,0.55)] backdrop-blur-2xl dark:border-white/10 dark:bg-white/[0.06]">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="control-label text-slate-500 dark:text-slate-300">Query receipt</p>
+                <h3 className="mt-1 text-xl font-semibold text-slate-800 dark:text-slate-100">Audited SQL &amp; data contract</h3>
+                <p className="text-sm text-subtle">
+                  {hasSql
+                    ? "Copy, audit, or share the exact SQL the assistant executed for this view."
+                    : "Run any prompt to generate verifiable SQL. Results will land here instantly."}
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="rounded-full border border-white/30 bg-white/70 px-4 font-semibold text-slate-700 shadow-sm backdrop-blur hover:-translate-y-0.5 dark:border-white/10 dark:bg-white/[0.08] dark:text-slate-100"
+                  onClick={() => onTabChange("analysis")}
+                >
+                  View data
+                </Button>
+                <Button
+                  size="sm"
+                  className="rounded-full bg-gradient-ocean px-4 font-semibold shadow-lg shadow-sky-500/20 transition hover:-translate-y-0.5"
+                  onClick={handleCopySql}
+                  disabled={!hasSql}
+                >
+                  {copiedSql ? <Check className="mr-2 h-4 w-4" /> : <Copy className="mr-2 h-4 w-4" />}
+                  {copiedSql ? "Copied" : "Copy SQL"}
+                </Button>
+              </div>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-3">
+              <SummaryChip label="Mode" value={mode === "expert" ? "Expert" : "Guided"} />
+              <SummaryChip label="Filters" value={filterSummary} />
+              <SummaryChip label="Lines" value={sqlLineCount ? sqlLineCount.toString() : "—"} />
+            </div>
+
+            <div className="flex min-h-[260px] flex-1 flex-col overflow-hidden rounded-[24px] border border-white/25 bg-slate-950/80 shadow-[0_30px_70px_-55px_rgba(15,23,42,0.65)] backdrop-blur-xl dark:border-white/15">
+              <div className="flex items-center justify-between border-b border-white/10 px-4 py-3 text-xs uppercase tracking-[0.26em] text-slate-200/80">
+                <span>SQL output</span>
+                <span className="text-[0.65rem] text-slate-300">
+                  {mode === "expert" ? "Manual filters" : "Guided"} · {sqlLineCount || "0"} lines
+                </span>
+              </div>
+              <div className="flex-1 overflow-hidden">
+                <CodeSnippet
+                  code={hasSql ? trimmedSql : "No SQL available yet. Ask a question or run a prompt to generate the query."}
+                  language="sql"
+                  className="h-full bg-slate-950/70 text-slate-100"
+                />
+              </div>
+            </div>
+
+            {synopsis && (
+              <div className="rounded-2xl border border-white/25 bg-white/80 p-4 shadow-sm dark:border-white/10 dark:bg-white/[0.05]">
+                <p className="text-[0.7rem] uppercase tracking-[0.26em] text-slate-500 dark:text-slate-300">Result context</p>
+                <div className="mt-2 grid gap-2 text-sm text-subtle md:grid-cols-2">
+                  {synopsis.highlights.map((line) => (
+                    <div key={line} className="flex items-start gap-2">
+                      <span className="mt-1 h-1.5 w-1.5 rounded-full bg-sky-400" />
+                      <span>{line}</span>
+                    </div>
+                  ))}
+                </div>
+                {synopsis.sampleFloat && (
+                  <p className="mt-3 text-xs uppercase tracking-[0.24em] text-slate-400 dark:text-slate-500">
+                    Sample float: {synopsis.sampleFloat}
+                  </p>
+                )}
+              </div>
+            )}
+          </TabsContent>
+        )}
+
+        {safeActiveTab === "profiles" && (
           <TabsContent value="profiles" className="mt-2 grid flex-1 min-h-0 grid-cols-1 gap-4 overflow-auto rounded-[28px] border border-white/20 bg-white/85 p-6 shadow-[0_35px_70px_-50px_rgba(15,23,42,0.55)] backdrop-blur-2xl dark:border-white/10 dark:bg-white/[0.05] dark:shadow-[0_45px_90px_-55px_rgba(2,6,23,0.85)] md:grid-cols-2">
             {hasTempProfileData || hasSalProfileData ? (
               <>

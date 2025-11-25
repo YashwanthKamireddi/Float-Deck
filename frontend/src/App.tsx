@@ -1,5 +1,4 @@
 // This is the main orchestrator for your entire frontend application.
-// It replaces the functionality of the original FloatAIDashboard.tsx.
 
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import type { LucideIcon } from "lucide-react";
@@ -11,6 +10,7 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import { askAI, floatAIAPI } from "@/services/api";
 import CommandPalette from "@/components/CommandPalette";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import LandingPage from "@/components/LandingPage";
 
@@ -191,6 +191,17 @@ function App() {
     activeFloats: number | null;
     lastUpdated: string | null;
   } | null>(null);
+
+  const depthFilterLabel = useMemo(() => {
+    if (!expertFilters.depthRange) return null;
+    const [minDepth, maxDepth] = expertFilters.depthRange;
+    if (minDepth !== null && maxDepth !== null) {
+      return `${Math.round(minDepth)}-${Math.round(maxDepth)} dbar`;
+    }
+    if (minDepth !== null) return `≥ ${Math.round(minDepth)} dbar`;
+    if (maxDepth !== null) return `≤ ${Math.round(maxDepth)} dbar`;
+    return null;
+  }, [expertFilters.depthRange]);
 
   const updateBackendStatus = useCallback((status: BackendStatus, detail?: string) => {
     setBackendStatus(status);
@@ -624,6 +635,7 @@ function App() {
                 <p className="max-w-2xl text-sm text-subtle md:text-base">
                   Guide autonomous ocean missions, query the ARGO archive, and direct the analysis as the viewscreen responds in real time.
                 </p>
+                <p className="text-xs text-subtle">{missionStatusDescriptor.description}</p>
               </div>
 
               <div className="flex flex-wrap items-center gap-2 rounded-full bg-slate-900/70 px-3 py-2 shadow-[0_12px_28px_-14px_rgba(15,23,42,0.55)] backdrop-blur dark:bg-slate-800/80">
@@ -670,6 +682,52 @@ function App() {
                 helper="Timestamp auto-synced"
               />
             </div>
+
+            <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/25 bg-white/80 px-4 py-3 shadow-[0_20px_50px_-38px_rgba(15,23,42,0.55)] backdrop-blur-2xl dark:border-white/10 dark:bg-white/[0.06]">
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="control-label text-slate-500 dark:text-slate-300">Persona</span>
+                <div className="inline-flex items-center gap-1 rounded-full bg-white/80 p-1 shadow-sm shadow-slate-900/5 dark:bg-white/[0.08] dark:shadow-black/30">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={mode === "guided" ? "default" : "ghost"}
+                    className="rounded-full px-4 text-xs font-semibold uppercase tracking-[0.24em]"
+                    onClick={() => handleModeChange("guided")}
+                  >
+                    Guided
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={mode === "expert" ? "default" : "ghost"}
+                    className="rounded-full px-4 text-xs font-semibold uppercase tracking-[0.24em]"
+                    onClick={() => handleModeChange("expert")}
+                  >
+                    Expert
+                  </Button>
+                </div>
+                <p className="text-xs text-subtle">
+                  {mode === "guided"
+                    ? "Onboarding prompts, summaries, and automatic guardrails."
+                    : "Full control of filters, SQL receipts, and focused metrics."}
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant="secondary" className="rounded-full border-white/40 bg-white/70 px-3 py-1 text-[0.7rem] uppercase tracking-[0.18em] text-slate-700 dark:border-white/10 dark:bg-white/[0.08] dark:text-slate-100">
+                  Focus: {expertFilters.focusMetric}
+                </Badge>
+                {expertFilters.floatId && (
+                  <Badge variant="outline" className="rounded-full border-white/40 bg-white/80 px-3 py-1 text-[0.7rem] uppercase tracking-[0.18em] text-slate-700 dark:border-white/10 dark:bg-white/[0.08] dark:text-slate-100">
+                    Float {expertFilters.floatId}
+                  </Badge>
+                )}
+                {depthFilterLabel && (
+                  <Badge variant="outline" className="rounded-full border-white/40 bg-white/80 px-3 py-1 text-[0.7rem] uppercase tracking-[0.18em] text-slate-700 dark:border-white/10 dark:bg-white/[0.08] dark:text-slate-100">
+                    {depthFilterLabel}
+                  </Badge>
+                )}
+              </div>
+            </div>
           </header>
 
           <section className="flex w-full flex-1 flex-col px-6 pb-16 lg:px-10 min-h-0">
@@ -698,7 +756,7 @@ function App() {
 
         <div className="fixed bottom-6 right-6 z-40 flex flex-col items-end gap-3 pointer-events-none">
           {showChatTray ? (
-            <div className="pointer-events-auto w-[480px] max-w-[95vw] max-h-[82vh] overflow-hidden rounded-3xl border border-white/20 bg-white/92 shadow-[0_26px_70px_-40px_rgba(15,23,42,0.65)] backdrop-blur-xl transition-all duration-200 ease-out dark:border-white/10 dark:bg-slate-900/92">
+            <div className="pointer-events-auto w-[480px] max-w-[95vw] max-h-[82vh] overflow-hidden rounded-3xl border border-white/10 bg-white/10 shadow-[0_18px_40px_-28px_rgba(15,23,42,0.6)] backdrop-blur-sm transition-all duration-200 ease-out dark:border-white/10 dark:bg-slate-900/40">
               <div className="relative flex h-[640px] max-h-[82vh] flex-col">
                 <button
                   type="button"

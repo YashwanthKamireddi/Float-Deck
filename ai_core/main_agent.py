@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -21,6 +22,8 @@ from langchain_core.runnables import RunnablePassthrough
 from langchain_google_genai import ChatGoogleGenerativeAI
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
+
+from ai_core.config import get_settings
 
 
 logger = logging.getLogger(__name__)
@@ -53,32 +56,32 @@ db = None
 db_engine: Optional[Engine] = None
 rag_chain = None
 conversation_chain = None
+settings = get_settings()
+QUERY_TIMEOUT_MS = settings.query_timeout_ms
 
 
 def _get_google_api_key() -> str:
-    api_key = os.getenv("GOOGLE_API_KEY")
+    api_key = settings.google_api_key
     if not api_key:
-        raise ConfigError(
-            "GOOGLE_API_KEY is not configured. Add it to your .env file before starting the API server."
-        )
+        raise ConfigError("GOOGLE_API_KEY is not configured. Add it to your .env file before starting the API server.")
     return api_key
 
 
 def _get_database_uri() -> str:
-    database_url = os.getenv("DATABASE_URL")
+    database_url = settings.database_url
     if database_url:
         return database_url
 
-    password = os.getenv("DB_PASSWORD")
+    password = settings.db_password
     if not password:
         raise ConfigError(
             "Database credentials are missing. Provide DATABASE_URL or DB_PASSWORD in your .env file."
         )
 
-    user = os.getenv("DB_USER", "postgres")
-    host = os.getenv("DB_HOST", "localhost")
-    port = os.getenv("DB_PORT", "5432")
-    db_name = os.getenv("DB_NAME", "float")
+    user = settings.db_user
+    host = settings.db_host
+    port = settings.db_port
+    db_name = settings.db_name
 
     return f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{db_name}"
 
@@ -107,7 +110,7 @@ def _initialise_sql_engine() -> Engine:
 
 
 def _get_faiss_index_path() -> str:
-    custom_path = os.getenv("FAISS_INDEX_PATH")
+    custom_path = settings.faiss_index_path
     default_path = Path(__file__).resolve().parent / "faiss_index"
     resolved_path = Path(custom_path) if custom_path else default_path
 
@@ -120,29 +123,17 @@ def _get_faiss_index_path() -> str:
 
 
 def _get_retriever_k(default: int = 6) -> int:
-    raw_value = os.getenv("RAG_RETRIEVER_K")
-    if raw_value is None:
+    value = settings.rag_retriever_k
+    if value < 1:
+        logger.warning("Invalid RAG_RETRIEVER_K value '%s'. Falling back to %s.", value, default)
         return default
-
-    candidate = raw_value.strip()
-    try:
-        value = int(candidate)
-        if value < 1:
-            raise ValueError
-        return value
-    except ValueError:
-        logger.warning(
-            "Invalid RAG_RETRIEVER_K value '%s'. Falling back to %s.",
-            candidate,
-            default,
-        )
-        return default
+    return value
 
 
 def _load_embedding_model():
     """Load the embedding model lazily to avoid heavy imports at module import time."""
 
-    embeddings_model_name = os.getenv("EMBEDDINGS_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
+    embeddings_model_name = settings.embeddings_model
 
     try:
         from langchain_huggingface import HuggingFaceEmbeddings  # type: ignore
@@ -175,6 +166,35 @@ def _looks_like_sql(query: str) -> bool:
         return False
     starters = ("select", "with", "insert", "update", "delete", "create", "drop")
     return stripped.startswith(starters)
+
+
+def _validate_sql(query: str) -> None:
+    """Reject obviously unsafe or non-read-only SQL emitted by the model."""
+
+    lowered = query.strip().lower()
+    if not lowered.startswith(("select", "with")):
+        raise RuntimeError("The generated SQL must start with SELECT/CTE and cannot perform writes.")
+
+    forbidden = (
+        "insert",
+        "update",
+        "delete",
+        "drop",
+        "alter",
+        "truncate",
+        "grant",
+        "revoke",
+        "vacuum",
+    )
+    for keyword in forbidden:
+        if re.search(rf"\\b{keyword}\\b", lowered):
+            raise RuntimeError(f"Unsafe SQL detected: '{keyword}' is not allowed.")
+
+    if ";" in lowered:
+        raise RuntimeError("Multiple statements are blocked. Remove extra semicolons and retry.")
+
+    if "argo_profiles" not in lowered:
+        raise RuntimeError("Queries must target the argo_profiles table.")
 
 
 def _build_data_messages(
@@ -320,7 +340,7 @@ def _initialise_components() -> Dict[str, Any]:
     llm_instance = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.1)
 
     # Load embeddings lazily here to avoid import-time transformer overhead.
-    embeddings_model_name = os.getenv("EMBEDDINGS_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
+    embeddings_model_name = settings.embeddings_model
     try:
         embedding_model = _load_embedding_model()
     except Exception as exc:  # pragma: no cover - defensive guard
@@ -456,9 +476,13 @@ def run_ai_pipeline(question: str) -> Dict[str, Any]:
 
             logger.info("Generated SQL: %s", generated_sql)
 
+            _validate_sql(generated_sql)
+
             with local_db._engine.connect() as connection:  # pylint: disable=protected-access
-                query_result = connection.execute(text(generated_sql))
-                result_data = [dict(row._mapping) for row in query_result]
+                with connection.begin():
+                    connection.execute(text("SET LOCAL statement_timeout = :ms"), {"ms": QUERY_TIMEOUT_MS})
+                    query_result = connection.execute(text(generated_sql))
+                    result_data = [dict(row._mapping) for row in query_result]
 
             logger.info("Query Result: %s row(s) found.", len(result_data))
 
